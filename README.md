@@ -1,5 +1,15 @@
 # TickerView
 
+**Single Purpose Description:** TickerView is a Chrome extension that provides real-time technical and fundamental stock data in a hover modal when a user interacts with stock tickers on any webpage.
+
+## 🛠 Permission Justification
+
+In accordance with the Single Purpose Policy, TickerView only requests the following essential permissions:
+- **Host Permissions (`yahoo.com`)**: Required to fetch real-time price, technical indicators, and chart data directly from the API.
+- **Content Scripts (`<all_urls>`)**: Required to scan and detect stock tickers ($TICKER format) in the text of any webpage to enable the hover functionality.
+
+---
+
 **TickerView** is a high-performance, aesthetically stunning Google Chrome extension designed for traders and investors. It provides real-time technical stats, fundamental data, and interactive sparkline charts directly on any webpage when you hover over a stock ticker.
 
 Built with an **"Obsidian Glass"** design philosophy, TickerView delivers professional-grade market intelligence with a premium, glassmorphism-inspired UI.

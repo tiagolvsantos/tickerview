@@ -3,9 +3,7 @@
   "name": "TickerView",
   "version": "1.0",
   "description": "Hover over stock tickers to see real-time technical stats and charts.",
-  "permissions": [
-    "storage"
-  ],
+  "permissions": [],
   "host_permissions": [
     "https://query1.finance.yahoo.com/*",
     "https://query2.finance.yahoo.com/*"
