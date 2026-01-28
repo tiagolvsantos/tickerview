@@ -302,7 +302,7 @@ function renderModalData(data, chart) {
     const isClose = d !== null && d <= 7 && d >= 0;
     const isRecentlyReported = eStatus && eStatus.includes('Reported');
 
-    let eColor = isClose ? '#ffcc00' : '#aaa';
+    let eColor = isClose ? '#ff8000' : '#aaa';
     let eEmoji = isClose ? '🚨 ' : '';
     let eText = data.earningsDate ? `Earnings: ${data.earningsDate} (${d}d)` : 'Earnings Reported';
 
@@ -311,7 +311,7 @@ function renderModalData(data, chart) {
       eEmoji = '📊 ';
       eText = eStatus;
     } else if (eStatus === 'Today') {
-      eColor = '#ffcc00';
+      eColor = '#ff8000';
       eEmoji = '🔥 ';
       eText = "Earnings TODAY";
     }
@@ -329,7 +329,7 @@ function renderModalData(data, chart) {
           ${(() => {
       const s = data.categorySentiment?.total;
       if (!s) return '';
-      const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ffcc00');
+      const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ff8000');
       return `<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; border: 1px solid ${color}; color: ${color}; text-transform: uppercase;">${s.label}</span>`;
     })()}
         </div>
@@ -404,7 +404,7 @@ function renderModalData(data, chart) {
         <div class="tv-target-container">
           <div class="tv-target-label-row">
             <span>Price Targets (${data.analystCount || 0} Analysts)</span>
-            <span style="color: #ffcc00">${data.recKey || ''}</span>
+            <span style="color: #ff8000">${data.recKey || ''}</span>
           </div>
           <div class="tv-target-bar-track">
             <!-- Indicators -->
@@ -507,7 +507,7 @@ function renderModalData(data, chart) {
       const sentItems = cats.map(cat => {
         const s = sentiment[cat];
         if (!s || s.count === 0) return '';
-        const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ffcc00');
+        const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ff8000');
         const icon = s.label === 'Bullish' ? '▲' : (s.label === 'Bearish' ? '▼' : '●');
         return `<div class="tv-sentiment-pill" style="border: 1px solid ${color}; color: ${color};">
           <span style="opacity: 0.7; text-transform: capitalize;">${cat}:</span> ${icon} ${s.label}
