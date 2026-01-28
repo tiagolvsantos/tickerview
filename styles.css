@@ -1,0 +1,312 @@
+/* TickerView Modern "Obsidian Glass" Theme */
+
+/* Highlight Hover Effect */
+.tickerview-highlight {
+  position: relative;
+  color: #ffcc00;
+  /* Golden Glow */
+  font-weight: 700;
+  cursor: help;
+  transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+  border-bottom: 2px solid rgba(255, 204, 0, 0.3);
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+.tickerview-highlight:hover {
+  background: rgba(255, 204, 0, 0.15);
+  border-bottom-color: #ffcc00;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(255, 204, 0, 0.6);
+}
+
+/* Modal Container */
+#tickerview-modal {
+  position: absolute;
+  z-index: 2147483647;
+  width: 320px;
+  /* Glassmorphism Background */
+  background: rgba(18, 18, 20, 0.90);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+
+  /* Modern Borders & Shadow */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+
+  padding: 20px;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Roboto Mono', ui-monospace, 'Cascadia Code', 'Ubuntu Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  animation: tv-scale-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+@keyframes tv-scale-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Header Section */
+.tv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tv-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tv-symbol {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #fff;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.tv-symbol:hover {
+  color: #ffcc00;
+}
+
+.tv-fullname {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Tag (Sector/Ind) */
+.tv-tag {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 500;
+}
+
+.tv-price-section {
+  text-align: right;
+}
+
+.tv-price {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.tv-change {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* Chart Area */
+.tv-chart-container {
+  width: 100%;
+  height: 60px;
+  margin-bottom: 20px;
+  /* Subtle inset effect */
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  /* Let SVG fill */
+}
+
+/* Grid Layout */
+.tv-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 24px;
+  row-gap: 10px;
+}
+
+.tv-stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.tv-stat-label {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tv-stat-value {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+}
+
+/* Pulse for Status */
+.tv-pulse {
+  animation: tv-pulse-anim 2s infinite;
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+@keyframes tv-pulse-anim {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 163, 0.1);
+    background: rgba(0, 255, 163, 0.05);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(0, 255, 163, 0);
+    background: rgba(0, 255, 163, 0.15);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 163, 0);
+    background: rgba(0, 255, 163, 0.05);
+  }
+}
+
+/* Footer */
+.tv-footer {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Info Icon & Legend */
+.tv-info-icon {
+  position: absolute;
+  bottom: 12px;
+  right: 20px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 1001;
+}
+
+.tv-info-icon:hover {
+  border-color: #ffcc00;
+  color: #ffcc00;
+  background: rgba(255, 204, 0, 0.1);
+}
+
+.tv-legend {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(10, 10, 12, 0.98);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 20px;
+  box-sizing: border-box;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  overflow-y: auto;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#tickerview-modal:hover .tv-info-icon:hover+.tv-legend,
+.tv-legend:hover {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tv-legend-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffcc00;
+  margin-bottom: 4px;
+}
+
+.tv-legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tv-legend-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tv-legend-desc {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.4;
+}
+
+/* Utilities */
+.tv-loader {
+  padding: 30px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+}
+
+.tv-spinner {
+  width: 20px;
+  height: 20px;
+  margin: 0 auto 10px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #ffcc00;
+  border-radius: 50%;
+  animation: tv-spin 0.8s linear infinite;
+}
+
+@keyframes tv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

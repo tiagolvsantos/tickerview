@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      width: 250px;
+      padding: 16px;
+      font-family: -apple-system, system-ui, sans-serif;
+      background: #121214;
+      color: #fff;
+      margin: 0;
+    }
+    h2 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      color: #007aff;
+    }
+    p {
+      font-size: 13px;
+      color: #a1a1a6;
+      line-height: 1.4;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 15px;
+      padding: 10px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      background: #00ffa3;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #00ffa3;
+    }
+  </style>
+</head>
+<body>
+  <h2>TickerView</h2>
+  <p>Hover over any stock ticker (e.g. $AAPL) on any webpage to see technical stats.</p>
+  <div class="status">
+    <div class="dot"></div>
+    <span>Active & Scanning</span>
+  </div>
+</body>
+</html>
