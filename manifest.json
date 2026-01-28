@@ -16,8 +16,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://twitter.com/*",
-        "https://x.com/*",
+        "https://*.twitter.com/*",
+        "https://*.x.com/*",
         "https://*.reddit.com/*",
         "https://*.finance.yahoo.com/*",
         "https://*.stocktwits.com/*",
@@ -38,7 +38,8 @@
       ],
       "css": [
         "styles.css"
-      ]
+      ],
+      "all_frames": true
     }
   ],
   "background": {

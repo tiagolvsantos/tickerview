@@ -323,3 +323,99 @@
   align-items: center;
   gap: 3px;
 }
+
+/* Price Target Bar */
+.tv-target-container {
+  margin: 16px 0;
+  padding: 8px 0;
+}
+
+.tv-target-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.tv-target-bar-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  position: relative;
+  margin: 10px 0;
+}
+
+.tv-target-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #000;
+}
+
+.tv-target-marker.low {
+  background: #ff4d4d;
+}
+
+.tv-target-marker.mean {
+  background: #ffcc00;
+}
+
+.tv-target-marker.high {
+  background: #00ffa3;
+}
+
+.tv-target-current {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 12px;
+  background: #fff;
+  box-shadow: 0 0 8px #fff;
+  z-index: 2;
+}
+
+.tv-target-val {
+  position: absolute;
+  top: 14px;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+}
+
+/* Research Dock */
+.tv-research-dock {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tv-research-link {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.2s;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tv-research-link:hover {
+  color: #ffcc00;
+  background: rgba(255, 204, 0, 0.1);
+  transform: translateY(-1px);
+}

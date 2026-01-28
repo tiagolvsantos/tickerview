@@ -168,6 +168,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           let marketCap = null, earningsDate = null, gapPct = null, officialChange = null, officialChangePct = null;
           let extendedPrice = null, extendedChangePct = null, sector = null, industry = null, longName = meta.symbol;
           let shortFloatPct = null, shortRatio = null;
+          let targetLow = null, targetMean = null, targetHigh = null, recKey = null, analystCount = null;
 
           // New: Key Levels (Yesterday High/Low)
           let keyLevelStatus = null, yHigh = null, yLow = null;
@@ -273,6 +274,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (s.price?.regularMarketOpen?.raw && s.price?.regularMarketPreviousClose?.raw) {
               gapPct = ((s.price.regularMarketOpen.raw - s.price.regularMarketPreviousClose.raw) / s.price.regularMarketPreviousClose.raw) * 100;
             }
+
+            if (s.financialData) {
+              const f = s.financialData;
+              targetLow = f.targetLowPrice?.raw || null;
+              targetMean = f.targetMeanPrice?.raw || null;
+              targetHigh = f.targetHighPrice?.raw || null;
+              recKey = f.recommendationKey ? f.recommendationKey.toUpperCase().replace(/_/g, ' ') : null;
+              analystCount = f.numberOfAnalystOpinions?.raw || null;
+            }
           }
 
           // Apply Failsafe if API failed or returned empty
@@ -282,6 +292,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }
           if ((!longName || longName === ticker) && failsafeMap[ticker]) {
             longName = failsafeMap[ticker].name;
+          }
+
+          // New: Search API Fallback (Very robust for Names/Sectors/Industry)
+          if (newsData.quotes && newsData.quotes.length > 0) {
+            const bestMatch = newsData.quotes.find(q => q.symbol === ticker) || newsData.quotes[0];
+            if (bestMatch) {
+              if (!longName || longName === ticker) {
+                longName = bestMatch.longname || bestMatch.shortname || bestMatch.name || longName;
+              }
+              if (!sector) sector = bestMatch.sector || bestMatch.sectorDisp;
+              if (!industry) industry = bestMatch.industry || bestMatch.industryDisp;
+            }
           }
 
           // Earnings Logic (Failsafe & Status)
@@ -454,6 +476,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             earningsStatus: earningsStatus,
             shortFloatPct: shortFloatPct,
             shortRatio: shortRatio,
+            targetLow, targetMean, targetHigh, recKey, analystCount,
             categorySentiment: (() => {
               const items = newsData.news || [];
               const categories = {
@@ -495,9 +518,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           };
 
           // Determine which chart to send
-          // User requested "Intraday Chart Mode".
-          // If we have intraday data, send it. Else fallback to daily.
-          const visualChart = (intraCloses.length > 0) ? { closes: intraCloses, volumes: intraVolumes, interval: '5m' } : { closes: closes, volumes: volumes, interval: '1d' };
+          const cleanCloses = closes.filter(v => v != null);
+          const cleanVolumes = volumes.filter(v => v != null);
+          const visualChart = (intraCloses.length > 0) ? { closes: intraCloses, volumes: intraVolumes, interval: '5m' } : { closes: cleanCloses, volumes: cleanVolumes, interval: '1d' };
 
           const payload = {
             success: true,

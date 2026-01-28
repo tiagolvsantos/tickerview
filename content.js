@@ -113,6 +113,7 @@ modal.addEventListener('mouseleave', () => {
 });
 
 async function showModal(ticker, rect) {
+  console.log(`[TickerView] Showing modal for ${ticker}`);
   currentTicker = ticker;
   modal.innerHTML = `
     <div class="tv-loader">
@@ -157,11 +158,16 @@ async function showModal(ticker, rect) {
       }
 
       if (response && response.success) {
-        renderModalData(response.quote, response.chart);
-        // Re-adjust height if needed after content is loaded
-        const finalHeight = modal.offsetHeight;
-        if (rect.bottom + finalHeight > window.innerHeight) {
-          modal.style.top = `${rect.top + window.scrollY - finalHeight - 10}px`;
+        try {
+          renderModalData(response.quote, response.chart);
+          // Re-adjust height if needed after content is loaded
+          const finalHeight = modal.offsetHeight;
+          if (rect.bottom + finalHeight > window.innerHeight) {
+            modal.style.top = `${rect.top + window.scrollY - finalHeight - 10}px`;
+          }
+        } catch (renderError) {
+          console.error('TickerView: Render error', renderError);
+          modal.innerHTML = `<div class="tv-error">Error rendering data: ${renderError.message}</div>`;
         }
       } else {
         const errorDetail = (response && response.error) ? response.error : "Unknown connection error";
@@ -319,7 +325,7 @@ function renderModalData(data, chart) {
     <div class="tv-header" style="position: relative; display: flex; flex-direction: column; gap: 4px;">
       <div class="tv-title-section" style="max-width: 100%;">
         <span class="tv-symbol" style="cursor: pointer;" onclick="window.open('https://www.tradingview.com/chart/?symbol=${data.symbol}', '_blank')">$${data.symbol}</span>
-        <div class="tv-fullname" style="white-space: normal; line-height: 1.2; font-size: 11px;">${data.longName || data.shortName || ''}</div>
+        <div class="tv-fullname" style="white-space: normal; line-height: 1.2; font-size: 11px;">${(data.longName && data.longName !== data.symbol) ? data.longName : ''}</div>
         ${sectorDisplay}
         ${earningDisplay}
       </div>
@@ -374,6 +380,41 @@ function renderModalData(data, chart) {
     </div>
 
     <div class="tv-chart-container" id="tv-sparkline"></div>
+
+    <!-- Price Target Bar -->
+    ${(() => {
+      if (!data.targetLow || !data.targetHigh) return '';
+      const min = Math.min(data.targetLow || data.regularMarketPrice, data.regularMarketPrice) * 0.95;
+      const max = Math.max(data.targetHigh || data.regularMarketPrice, data.regularMarketPrice) * 1.05;
+      const range = (max - min) || 1;
+      const getPos = (val) => {
+        if (val === null || val === undefined) return 0;
+        return ((val - min) / range) * 100;
+      };
+
+      return `
+        <div class="tv-target-container">
+          <div class="tv-target-label-row">
+            <span>Price Targets (${data.analystCount || 0} Analysts)</span>
+            <span style="color: #ffcc00">${data.recKey || ''}</span>
+          </div>
+          <div class="tv-target-bar-track">
+            <!-- Indicators -->
+            <div class="tv-target-marker low" style="left: ${getPos(data.targetLow)}%">
+              <div class="tv-target-val">L: ${f(data.targetLow, 0)}</div>
+            </div>
+            <div class="tv-target-marker mean" style="left: ${getPos(data.targetMean)}%">
+              <div class="tv-target-val">M: ${f(data.targetMean, 0)}</div>
+            </div>
+            <div class="tv-target-marker high" style="left: ${getPos(data.targetHigh)}%">
+              <div class="tv-target-val">H: ${f(data.targetHigh, 0)}</div>
+            </div>
+            <!-- Current Price -->
+            <div class="tv-target-current" style="left: ${getPos(data.regularMarketPrice)}%"></div>
+          </div>
+        </div>
+      `;
+    })()}
     
     <!-- Grid 1: Fundamentals & Momentum -->
     <div class="tv-stats-grid">
@@ -476,6 +517,13 @@ function renderModalData(data, chart) {
       }
       return '';
     })()}
+
+    <!-- Research Dock -->
+    <div class="tv-research-dock">
+      <a href="https://www.tradingview.com/chart/?symbol=${data.symbol}" target="_blank" class="tv-research-link">TradingView</a>
+      <a href="https://finviz.com/quote.ashx?t=${data.symbol}" target="_blank" class="tv-research-link">Finviz</a>
+      <a href="http://openinsider.com/search?q=${data.symbol}" target="_blank" class="tv-research-link">Insider</a>
+    </div>
 
     <div class="tv-footer">
       Powered by Scap Cerberus
