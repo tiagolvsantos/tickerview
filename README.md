@@ -6,7 +6,8 @@
 
 In accordance with the Single Purpose Policy, TickerView only requests the following essential permissions:
 - **Host Permissions (`yahoo.com`)**: Required to fetch real-time price, technical indicators, and chart data directly from the API.
-- **Content Scripts (`<all_urls>`)**: Required to scan and detect stock tickers ($TICKER format) in the text of any webpage to enable the hover functionality.
+- **Content Scripts**: Explicitly limited to major financial and social platforms (Twitter, Reddit, Yahoo Finance, etc.) to automatically detect tickers where they are most relevant.
+- **activeTab Permission**: Allows the user to manually trigger TickerView on any other website by clicking the extension icon, providing a privacy-first fallback.
 
 ---
 

@@ -3,7 +3,9 @@
   "name": "TickerView",
   "version": "1.0",
   "description": "Hover over stock tickers to see real-time technical stats and charts.",
-  "permissions": [],
+  "permissions": [
+    "activeTab"
+  ],
   "host_permissions": [
     "https://query1.finance.yahoo.com/*",
     "https://query2.finance.yahoo.com/*"
@@ -14,7 +16,22 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "https://twitter.com/*",
+        "https://x.com/*",
+        "https://*.reddit.com/*",
+        "https://*.finance.yahoo.com/*",
+        "https://*.stocktwits.com/*",
+        "https://*.seekingalpha.com/*",
+        "https://*.investing.com/*",
+        "https://*.tradingview.com/*",
+        "https://*.marketwatch.com/*",
+        "https://*.bloomberg.com/*",
+        "https://*.cnbc.com/*",
+        "https://*.wsj.com/*",
+        "https://*.reuters.com/*",
+        "https://*.benzinga.com/*",
+        "https://*.fool.com/*",
+        "https://*.finviz.com/*"
       ],
       "js": [
         "content.js"
