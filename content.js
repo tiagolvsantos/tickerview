@@ -324,7 +324,15 @@ function renderModalData(data, chart) {
   modal.innerHTML = `
     <div class="tv-header" style="position: relative; display: flex; flex-direction: column; gap: 4px;">
       <div class="tv-title-section" style="max-width: 100%;">
-        <span class="tv-symbol" style="cursor: pointer;" onclick="window.open('https://www.tradingview.com/chart/?symbol=${data.symbol}', '_blank')">$${data.symbol}</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="tv-symbol" style="cursor: pointer;" onclick="window.open('https://www.tradingview.com/chart/?symbol=${data.symbol}', '_blank')">$${data.symbol}</span>
+          ${(() => {
+      const s = data.categorySentiment?.total;
+      if (!s) return '';
+      const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ffcc00');
+      return `<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; border: 1px solid ${color}; color: ${color}; text-transform: uppercase;">${s.label}</span>`;
+    })()}
+        </div>
         <div class="tv-fullname" style="white-space: normal; line-height: 1.2; font-size: 11px;">${(data.longName && data.longName !== data.symbol) ? data.longName : ''}</div>
         ${sectorDisplay}
         ${earningDisplay}
@@ -370,8 +378,8 @@ function renderModalData(data, chart) {
       </div>
 
       <div class="tv-legend-item">
-        <span class="tv-legend-label">Sentiment Radar</span>
-        <span class="tv-legend-desc">AI-driven analysis of recent news headlines across 5 categories (Auction, Politics, Weather, Macro, Policy). Bullish (Green) or Bearish (Red).</span>
+        <span class="tv-legend-label">Sentiment News</span>
+        <span class="tv-legend-desc">Time-weighted analysis of news headlines. Recent news carries more weight. Analyzes Corporate (Earnings/M&A), Macro (Fed/Rates), Regs (Legal), and Retail/Social heat.</span>
       </div>
       
        <div class="tv-legend-item">
@@ -495,13 +503,14 @@ function renderModalData(data, chart) {
     <!-- Sentiment Radar -->
     ${(() => {
       const sentiment = data.categorySentiment || {};
-      const cats = ['auction', 'politics', 'weather', 'macro', 'policy'];
+      const cats = ['corporate', 'macro', 'regulation', 'retail'];
       const sentItems = cats.map(cat => {
         const s = sentiment[cat];
         if (!s || s.count === 0) return '';
         const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ffcc00');
+        const icon = s.label === 'Bullish' ? '▲' : (s.label === 'Bearish' ? '▼' : '●');
         return `<div class="tv-sentiment-pill" style="border: 1px solid ${color}; color: ${color};">
-          <span style="opacity: 0.7; text-transform: capitalize;">${cat}:</span> ${s.label}
+          <span style="opacity: 0.7; text-transform: capitalize;">${cat}:</span> ${icon} ${s.label}
         </div>`;
       }).filter(x => x !== '').join('');
 

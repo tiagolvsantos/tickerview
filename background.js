@@ -479,26 +479,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             targetLow, targetMean, targetHigh, recKey, analystCount,
             categorySentiment: (() => {
               const items = newsData.news || [];
+              const nowSeconds = Math.floor(Date.now() / 1000);
+
               const categories = {
-                auction: { keywords: ['auction', 'treasury', 'yield', 'bond', 'bid', 'cover', 'debt', 'fixed income', 'notes'], score: 0, count: 0 },
-                politics: { keywords: ['politics', 'election', 'trump', 'harris', 'biden', 'congress', 'senate', 'voting', 'diplomatic', 'washington', 'white house', 'legislation', 'geopolitical'], score: 0, count: 0 },
-                weather: { keywords: ['weather', 'hurricane', 'storm', 'climate', 'drought', 'flood', 'temperature', 'commodity', 'agriculture', 'energy', 'oil', 'gas'], score: 0, count: 0 },
-                macro: { keywords: ['macro', 'gdp', 'inflation', 'cpi', 'unemployment', 'rates', 'fed', 'central bank', 'economy', 'retail sales', 'consumer', 'labor', 'jobs', 'interest'], score: 0, count: 0 },
-                policy: { keywords: ['policy', 'regulation', 'sec', 'antitrust', 'law', 'bill', 'tariff', 'tax', 'litigation', 'ftc', 'doj', 'court', 'lawsuit', 'legal', 'compliance'], score: 0, count: 0 }
+                corporate: { keywords: ['earnings', 'dividend', 'buyback', 'merger', 'acquisition', 'layoff', 'guidance', 'revenue', 'profit', 'beat', 'miss', 'ceo', 'product', 'launch', 'partnership'], score: 0, count: 0 },
+                macro: { keywords: ['inflation', 'cpi', 'fed', 'rates', 'gdp', 'unemployment', 'economy', 'interest', 'yield', 'treasury', 'debt'], score: 0, count: 0 },
+                regulation: { keywords: ['sec', 'lawsuit', 'fine', 'court', 'antitrust', 'regulator', 'legal', 'probe', 'investigation', 'compliance'], score: 0, count: 0 },
+                retail: { keywords: ['reddit', 'squeeze', 'retail', 'moon', 'rocket', 'pump', 'dump', 'trending', 'social', 'community'], score: 0, count: 0 }
               };
 
-              const posWords = ['bull', 'surge', 'growth', 'gain', 'buy', 'positive', 'upbeat', 'beat', 'climb', 'higher', 'profit', 'expansion', 'outperform', 'upgrade', 'optimistic', 'recovery', 'strong', 'momentum'];
-              const negWords = ['bear', 'drop', 'slump', 'loss', 'sell', 'negative', 'downbeat', 'miss', 'fall', 'lower', 'risk', 'contraction', 'underperform', 'downgrade', 'pessimistic', 'crash', 'fears', 'inflation', 'recession', 'weak', 'headwind'];
+              // Weighted Word Intensity
+              const posWeights = { 'surge': 2.0, 'breakout': 2.0, 'moon': 2.0, 'beat': 1.5, 'growth': 1.2, 'buy': 1.2, 'positive': 1.0, 'climb': 1.0, 'strong': 1.2, 'higher': 0.8, 'profit': 1.0, 'optimistic': 1.0, 'partnership': 1.5, 'upgrade': 1.5, 'innovative': 1.0, 'subscription': 1.2 };
+              const negWeights = { 'crash': 2.5, 'plunge': 2.0, 'slump': 1.8, 'miss': 1.5, 'layoff': 2.0, 'fine': 2.0, 'lawsuit': 1.5, 'negative': 1.0, 'drop': 1.0, 'fall': 0.8, 'underperform': 1.5, 'risk': 1.2, 'inflation': 1.0, 'downgrade': 1.5, 'bankruptcy': 2.5, 'insolvency': 2.5, 'debt': 1.0 };
+
+              let totalScore = 0;
+              let totalWeight = 0;
 
               items.forEach(item => {
                 const title = (item.title || "").toLowerCase();
-                let itemScore = 0;
-                posWords.forEach(w => { if (title.includes(w)) itemScore++; });
-                negWords.forEach(w => { if (title.includes(w)) itemScore--; });
+                const pubTime = item.providerPublishTime || (nowSeconds - 86400); // Default 1 day old
 
+                // Time Decay: News from 1hr ago (1.0 weight) -> 24hr ago (0.2 weight)
+                const ageHours = (nowSeconds - pubTime) / 3600;
+                const timeDecay = Math.max(0.1, 1 - (ageHours / 48)); // Decay over 48 hours
+
+                let itemScore = 0;
+                Object.keys(posWeights).forEach(w => { if (title.includes(w)) itemScore += posWeights[w]; });
+                Object.keys(negWeights).forEach(w => { if (title.includes(w)) itemScore -= negWeights[w]; });
+
+                const weightedScore = itemScore * timeDecay;
+
+                if (itemScore !== 0) {
+                  totalScore += weightedScore;
+                  totalWeight += timeDecay;
+                }
+
+                // Associate with categories
                 Object.keys(categories).forEach(cat => {
                   if (categories[cat].keywords.some(k => title.includes(k))) {
-                    categories[cat].score += itemScore;
+                    categories[cat].score += weightedScore;
                     categories[cat].count++;
                   }
                 });
@@ -509,10 +528,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const avg = categories[cat].count > 0 ? categories[cat].score / categories[cat].count : 0;
                 results[cat] = {
                   score: avg,
-                  label: avg > 0.05 ? 'Bullish' : (avg < -0.05 ? 'Bearish' : 'Neutral'),
+                  label: avg > 0.1 ? 'Bullish' : (avg < -0.1 ? 'Bearish' : 'Neutral'),
                   count: categories[cat].count
                 };
               });
+
+              // Overall Score
+              const finalTotal = totalWeight > 0 ? totalScore / totalWeight : 0;
+              results.total = {
+                score: finalTotal,
+                label: finalTotal > 0.1 ? 'Bullish' : (finalTotal < -0.1 ? 'Bearish' : 'Neutral')
+              };
+
               return results;
             })()
           };
