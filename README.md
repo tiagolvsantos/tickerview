@@ -28,6 +28,12 @@ Built with an **"Obsidian Glass"** design philosophy, TickerView delivers profes
   - **Mean Reversion Tools**: Z-Score (Stretch) and Bollinger Band % position.
   - **Momentum**: 14-day RSI and VWAP distance.
 - **Earnings Radar**: Smart alerts for upcoming or recently reported earnings to help you navigate volatility.
+- **Sentiment Radar**: Real-time analytical engine that parses recent news headlines to categorize sentiment across five dimensions:
+  - **Auction**: Treasury, yield, and bond market sentiment.
+  - **Politics**: Geopolitical and legislative impacts.
+  - **Weather**: Climate and seasonal influences on assets.
+  - **Macro**: GDP, inflation, and interest rate trends.
+  - **Policy**: Regulatory and legal landscape (SEC, Antitrust).
 - **Contextual Intelligence**: Automatic detection of Sector/Industry and key levels (Breakout/Inside/Breakdown vs. Yesterday's High/Low).
 - **Interactive Legend**: Hover over the `?` icon to view detailed definitions of every indicator.
 

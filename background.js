@@ -28,6 +28,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Use v7 which is often more stable
         // Institutional Modules: Chart, Intra, Profiles, Stats, and Financials
         const sumUrl = `https://query1.finance.yahoo.com/v7/finance/quoteSummary/${ticker}?modules=summaryDetail,price,calendarEvents,summaryProfile,assetProfile,defaultKeyStatistics,financialData`;
+        const newsUrl = `https://query2.finance.yahoo.com/v1/finance/search?q=${ticker}`;
 
         // SPY Cache Logic
         if (!globalThis.spyCache) globalThis.spyCache = { change: null, time: 0 };
@@ -46,11 +47,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } catch (e) { return null; }
         };
 
-        const [chartRes, intraRes, sumRes, spyChange] = await Promise.all([
+        const [chartRes, intraRes, sumRes, spyChange, newsRes] = await Promise.all([
           fetch(chartUrl),
           fetch(intraUrl),
           fetch(sumUrl),
-          fetchSpy()
+          fetchSpy(),
+          fetch(newsUrl)
         ]);
 
         const chartData = await chartRes.json();
@@ -58,6 +60,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Handle sumRes errors gracefully
         let sumData = {};
         try { sumData = await sumRes.json(); } catch (e) { }
+        let newsData = {};
+        try { newsData = await newsRes.json(); } catch (e) { }
 
         let quote = {};
         let meta = {};
@@ -449,7 +453,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             earningsDays: earningsDays,
             earningsStatus: earningsStatus,
             shortFloatPct: shortFloatPct,
-            shortRatio: shortRatio
+            shortRatio: shortRatio,
+            categorySentiment: (() => {
+              const items = newsData.news || [];
+              const categories = {
+                auction: { keywords: ['auction', 'treasury', 'yield', 'bond', 'bid', 'cover', 'debt', 'fixed income', 'notes'], score: 0, count: 0 },
+                politics: { keywords: ['politics', 'election', 'trump', 'harris', 'biden', 'congress', 'senate', 'voting', 'diplomatic', 'washington', 'white house', 'legislation', 'geopolitical'], score: 0, count: 0 },
+                weather: { keywords: ['weather', 'hurricane', 'storm', 'climate', 'drought', 'flood', 'temperature', 'commodity', 'agriculture', 'energy', 'oil', 'gas'], score: 0, count: 0 },
+                macro: { keywords: ['macro', 'gdp', 'inflation', 'cpi', 'unemployment', 'rates', 'fed', 'central bank', 'economy', 'retail sales', 'consumer', 'labor', 'jobs', 'interest'], score: 0, count: 0 },
+                policy: { keywords: ['policy', 'regulation', 'sec', 'antitrust', 'law', 'bill', 'tariff', 'tax', 'litigation', 'ftc', 'doj', 'court', 'lawsuit', 'legal', 'compliance'], score: 0, count: 0 }
+              };
+
+              const posWords = ['bull', 'surge', 'growth', 'gain', 'buy', 'positive', 'upbeat', 'beat', 'climb', 'higher', 'profit', 'expansion', 'outperform', 'upgrade', 'optimistic', 'recovery', 'strong', 'momentum'];
+              const negWords = ['bear', 'drop', 'slump', 'loss', 'sell', 'negative', 'downbeat', 'miss', 'fall', 'lower', 'risk', 'contraction', 'underperform', 'downgrade', 'pessimistic', 'crash', 'fears', 'inflation', 'recession', 'weak', 'headwind'];
+
+              items.forEach(item => {
+                const title = (item.title || "").toLowerCase();
+                let itemScore = 0;
+                posWords.forEach(w => { if (title.includes(w)) itemScore++; });
+                negWords.forEach(w => { if (title.includes(w)) itemScore--; });
+
+                Object.keys(categories).forEach(cat => {
+                  if (categories[cat].keywords.some(k => title.includes(k))) {
+                    categories[cat].score += itemScore;
+                    categories[cat].count++;
+                  }
+                });
+              });
+
+              const results = {};
+              Object.keys(categories).forEach(cat => {
+                const avg = categories[cat].count > 0 ? categories[cat].score / categories[cat].count : 0;
+                results[cat] = {
+                  score: avg,
+                  label: avg > 0.05 ? 'Bullish' : (avg < -0.05 ? 'Bearish' : 'Neutral'),
+                  count: categories[cat].count
+                };
+              });
+              return results;
+            })()
           };
 
           // Determine which chart to send

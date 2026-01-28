@@ -283,7 +283,7 @@ function renderModalData(data, chart) {
 
   // Sector & Industry Tag
   const sectorDisplay = data.sector ? `<div style="font-size: 10px; color: #888; margin-top: 2px; line-height: 1.2;">
-    ${data.sector} <span style="opacity: 0.5;">•</span> ${data.industry || ''}
+    ${data.sector}${data.industry ? ` <span style="opacity: 0.5;">•</span> ${data.industry}` : ''}
   </div>` : '';
 
   // Earnings Radar (Upgraded)
@@ -361,6 +361,11 @@ function renderModalData(data, chart) {
       <div class="tv-legend-item">
         <span class="tv-legend-label">Status</span>
         <span class="tv-legend-desc">Breakout/Down vs. Yesterday's High/Low.</span>
+      </div>
+
+      <div class="tv-legend-item">
+        <span class="tv-legend-label">Sentiment Radar</span>
+        <span class="tv-legend-desc">AI-driven analysis of recent news headlines across 5 categories (Auction, Politics, Weather, Macro, Policy). Bullish (Green) or Bearish (Red).</span>
       </div>
       
        <div class="tv-legend-item">
@@ -445,6 +450,32 @@ function renderModalData(data, chart) {
         <span class="tv-stat-value">${f(data.adrPct, 1)}%</span>
       </div>
     </div>
+
+    <!-- Sentiment Radar -->
+    ${(() => {
+      const sentiment = data.categorySentiment || {};
+      const cats = ['auction', 'politics', 'weather', 'macro', 'policy'];
+      const sentItems = cats.map(cat => {
+        const s = sentiment[cat];
+        if (!s || s.count === 0) return '';
+        const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ffcc00');
+        return `<div class="tv-sentiment-pill" style="border: 1px solid ${color}; color: ${color};">
+          <span style="opacity: 0.7; text-transform: capitalize;">${cat}:</span> ${s.label}
+        </div>`;
+      }).filter(x => x !== '').join('');
+
+      if (sentItems) {
+        return `
+          <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+            <div style="font-size: 10px; color: #888; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase;">Sentiment Radar</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+              ${sentItems}
+            </div>
+          </div>
+        `;
+      }
+      return '';
+    })()}
 
     <div class="tv-footer">
       Powered by Scap Cerberus
