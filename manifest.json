@@ -1,11 +1,9 @@
 {
   "manifest_version": 3,
   "name": "TickerView",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Hover over stock tickers to see real-time technical stats and charts.",
-  "permissions": [
-    "activeTab"
-  ],
+  "permissions": [],
   "host_permissions": [
     "https://query1.finance.yahoo.com/*",
     "https://query2.finance.yahoo.com/*"
@@ -49,5 +47,16 @@
   "icons": {
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/icon48.png",
+        "icons/icon128.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

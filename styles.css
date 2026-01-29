@@ -26,17 +26,17 @@
   z-index: 2147483647;
   width: 320px;
   /* Glassmorphism Background */
-  background: rgba(10, 15, 26, 0.90);
+  background: rgba(10, 15, 26, 0.98);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 
   /* Modern Borders & Shadow */
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 16px;
   box-shadow:
     0 20px 40px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 
   padding: 20px;
   font-family: 'SF Mono', 'JetBrains Mono', 'Roboto Mono', ui-monospace, 'Cascadia Code', 'Ubuntu Mono', monospace;
@@ -66,7 +66,7 @@
   align-items: flex-start;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .tv-title-section {
@@ -176,7 +176,7 @@
   display: inline-block;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 @keyframes tv-pulse-anim {
@@ -200,7 +200,7 @@
 .tv-footer {
   margin-top: 20px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
   font-size: 9px;
   color: rgba(255, 255, 255, 0.25);
   text-align: center;
@@ -216,7 +216,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -299,7 +299,7 @@
   width: 20px;
   height: 20px;
   margin: 0 auto 10px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.05);
   border-top-color: #ff8000;
   border-radius: 50%;
   animation: tv-spin 0.8s linear infinite;
@@ -318,7 +318,7 @@
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -342,7 +342,7 @@
 
 .tv-target-bar-track {
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 2px;
   position: relative;
   margin: 10px 0;
@@ -398,7 +398,7 @@
   gap: 12px;
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .tv-research-link {
@@ -411,7 +411,7 @@
   transition: all 0.2s;
   padding: 4px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .tv-research-link:hover {

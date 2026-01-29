@@ -190,6 +190,17 @@ async function showModal(ticker, rect) {
   }
 }
 
+// Helper to escape HTML and prevent XSS
+function escapeHtml(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function renderModalData(data, chart) {
   const isPositive = (data.regularMarketChange || 0) >= 0;
   const changeColor = isPositive ? '#00ffa3' : '#ff4d4d';
@@ -197,16 +208,25 @@ function renderModalData(data, chart) {
   // Helper for safe decimal formatting
   const f = (val, dec = 2, prefix = '') => {
     if (val === null || val === undefined) return 'N/A';
-    if (typeof val === 'string') return val;
+    if (typeof val === 'string') return escapeHtml(val);
     return prefix + val.toFixed(dec);
   };
 
   // Helper for volume/cap specifically
   const fNum = (val) => {
     if (!val) return 'N/A';
-    if (typeof val === 'string') return val;
+    if (typeof val === 'string') return escapeHtml(val);
     return formatNumber(val);
   };
+
+  // Safe strings
+  const safeSymbol = escapeHtml(data.symbol);
+  const safeLongName = escapeHtml(data.longName);
+  const safeSector = escapeHtml(data.sector);
+  const safeIndustry = escapeHtml(data.industry);
+  const safeRecKey = escapeHtml(data.recKey);
+  const safeEarningsStatus = escapeHtml(data.earningsStatus);
+
 
   // --- Display Logic ---
 
@@ -266,7 +286,7 @@ function renderModalData(data, chart) {
   const rssColor = (rss || 0) >= 0 ? '#00ffa3' : '#ff4d4d';
   const rssSign = (rss || 0) >= 0 ? '+' : '';
   const rssDisplay = rss !== null && rss !== undefined ? `<span style="color: ${rssColor}">(${rssSign}${rss.toFixed(1)}%)</span>` : 'N/A';
-  const rssLabel = data.sectorEtf ? `RS (${data.sectorEtf})` : 'RS (Sector)';
+  const rssLabel = data.sectorEtf ? `RS (${escapeHtml(data.sectorEtf)})` : 'RS (Sector)';
 
   // Status (Pulse Effect)
   const status = data.keyLevelStatus;
@@ -274,7 +294,7 @@ function renderModalData(data, chart) {
   if (status === 'Breakout') statusColor = '#00ffa3';
   if (status === 'Breakdown') statusColor = '#ff4d4d';
   const statusClass = (status === 'Breakout' || status === 'Breakdown') ? 'tv-pulse' : '';
-  const statusDisplay = status ? `<span class="${statusClass}" style="color: ${statusColor}; font-weight: ${status !== 'Inside' ? 'bold' : 'normal'}">${status}</span>` : 'Inside';
+  const statusDisplay = status ? `<span class="${statusClass}" style="color: ${statusColor}; font-weight: ${status !== 'Inside' ? 'bold' : 'normal'}">${escapeHtml(status)}</span>` : 'Inside';
 
   // Extended Hours
   let extDisplay = '';
@@ -288,14 +308,14 @@ function renderModalData(data, chart) {
   }
 
   // Sector & Industry Tag
-  const sectorDisplay = data.sector ? `<div style="font-size: 10px; color: #888; margin-top: 2px; line-height: 1.2;">
-    ${data.sector}${data.industry ? ` <span style="opacity: 0.5;">•</span> ${data.industry}` : ''}
+  const sectorDisplay = safeSector ? `<div style="font-size: 10px; color: #888; margin-top: 2px; line-height: 1.2;">
+    ${safeSector}${safeIndustry ? ` <span style="opacity: 0.5;">•</span> ${safeIndustry}` : ''}
   </div>` : '';
 
   // Earnings Radar (Upgraded)
   let earningDisplay = '';
   const d = data.earningsDays;
-  const eStatus = data.earningsStatus;
+  const eStatus = safeEarningsStatus;
   const hasEarningsData = data.earningsDate || (eStatus && eStatus.includes('Reported'));
 
   if (hasEarningsData) {
@@ -304,7 +324,7 @@ function renderModalData(data, chart) {
 
     let eColor = isClose ? '#ff8000' : '#aaa';
     let eEmoji = isClose ? '🚨 ' : '';
-    let eText = data.earningsDate ? `Earnings: ${data.earningsDate} (${d}d)` : 'Earnings Reported';
+    let eText = data.earningsDate ? `Earnings: ${escapeHtml(data.earningsDate)} (${d}d)` : 'Earnings Reported';
 
     if (isRecentlyReported) {
       eColor = '#00ffa3';
@@ -325,15 +345,15 @@ function renderModalData(data, chart) {
     <div class="tv-header" style="position: relative; display: flex; flex-direction: column; gap: 4px;">
       <div class="tv-title-section" style="max-width: 100%;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="tv-symbol" style="cursor: pointer;" onclick="window.open('https://www.tradingview.com/chart/?symbol=${data.symbol}', '_blank')">$${data.symbol}</span>
+          <span class="tv-symbol" style="cursor: pointer;" onclick="window.open('https://www.tradingview.com/chart/?symbol=${safeSymbol}', '_blank')">$${safeSymbol}</span>
           ${(() => {
       const s = data.categorySentiment?.total;
       if (!s) return '';
       const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ff8000');
-      return `<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; border: 1px solid ${color}; color: ${color}; text-transform: uppercase;">${s.label}</span>`;
+      return `<span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; border: 1px solid ${color}; color: ${color}; text-transform: uppercase;">${escapeHtml(s.label)}</span>`;
     })()}
         </div>
-        <div class="tv-fullname" style="white-space: normal; line-height: 1.2; font-size: 11px;">${(data.longName && data.longName !== data.symbol) ? data.longName : ''}</div>
+        <div class="tv-fullname" style="white-space: normal; line-height: 1.2; font-size: 11px;">${(safeLongName && safeLongName !== safeSymbol) ? safeLongName : ''}</div>
         ${sectorDisplay}
         ${earningDisplay}
       </div>
@@ -404,7 +424,7 @@ function renderModalData(data, chart) {
         <div class="tv-target-container">
           <div class="tv-target-label-row">
             <span>Price Targets (${data.analystCount || 0} Analysts)</span>
-            <span style="color: #ff8000">${data.recKey || ''}</span>
+            <span style="color: #ff8000">${safeRecKey || ''}</span>
           </div>
           <div class="tv-target-bar-track">
             <!-- Indicators -->
@@ -441,7 +461,7 @@ function renderModalData(data, chart) {
     </div>
 
     <!-- Grid 2: Technicals & Context -->
-    <div class="tv-stats-grid" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+    <div class="tv-stats-grid" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 10px;">
        <div class="tv-stat-item">
         <span class="tv-stat-label">RSI (14)</span>
         <span class="tv-stat-value" style="color: ${rsiColor}">${f(data.rsi, 1)}</span> 
@@ -460,12 +480,12 @@ function renderModalData(data, chart) {
       </div>
       <div class="tv-stat-item">
         <span class="tv-stat-label">Range</span>
-        <span class="tv-stat-value">${data.fiftyTwoWeekRange || 'N/A'}</span>
+        <span class="tv-stat-value">${escapeHtml(data.fiftyTwoWeekRange) || 'N/A'}</span>
       </div>
     </div>
 
     <!-- Grid 3: Moving Averages -->
-    <div class="tv-stats-grid" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+    <div class="tv-stats-grid" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 10px;">
       <div class="tv-stat-item">
         <span class="tv-stat-label">50 DMA</span>
         <span class="tv-stat-value">${f(data.fiftyDayAverage, 2, '$')}</span>
@@ -477,7 +497,7 @@ function renderModalData(data, chart) {
     </div>
 
     <!-- Grid 4: Market Mechanics -->
-    <div class="tv-stats-grid" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+    <div class="tv-stats-grid" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 10px;">
       <div class="tv-stat-item">
         <span class="tv-stat-label">Stretch (Z)</span>
         <span class="tv-stat-value" style="color: ${Math.abs(data.zScore) > 2 ? (data.zScore > 0 ? '#ff4d4d' : '#00ffa3') : '#fff'}">
@@ -510,13 +530,13 @@ function renderModalData(data, chart) {
         const color = s.label === 'Bullish' ? '#00ffa3' : (s.label === 'Bearish' ? '#ff4d4d' : '#ff8000');
         const icon = s.label === 'Bullish' ? '▲' : (s.label === 'Bearish' ? '▼' : '●');
         return `<div class="tv-sentiment-pill" style="border: 1px solid ${color}; color: ${color};">
-          <span style="opacity: 0.7; text-transform: capitalize;">${cat}:</span> ${icon} ${s.label}
+          <span style="opacity: 0.7; text-transform: capitalize;">${escapeHtml(cat)}:</span> ${icon} ${escapeHtml(s.label)}
         </div>`;
       }).filter(x => x !== '').join('');
 
       if (sentItems) {
         return `
-          <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
+          <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 10px;">
             <div style="font-size: 10px; color: #888; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase;">Sentiment Radar</div>
             <div style="display: flex; flex-wrap: wrap; gap: 4px;">
               ${sentItems}
@@ -529,9 +549,9 @@ function renderModalData(data, chart) {
 
     <!-- Research Dock -->
     <div class="tv-research-dock">
-      <a href="https://www.tradingview.com/chart/?symbol=${data.symbol}" target="_blank" class="tv-research-link">TradingView</a>
-      <a href="https://finviz.com/quote.ashx?t=${data.symbol}" target="_blank" class="tv-research-link">Finviz</a>
-      <a href="http://openinsider.com/search?q=${data.symbol}" target="_blank" class="tv-research-link">Insider</a>
+      <a href="https://www.tradingview.com/chart/?symbol=${safeSymbol}" target="_blank" class="tv-research-link">TradingView</a>
+      <a href="https://finviz.com/quote.ashx?t=${safeSymbol}" target="_blank" class="tv-research-link">Finviz</a>
+      <a href="http://openinsider.com/search?q=${safeSymbol}" target="_blank" class="tv-research-link">Insider</a>
     </div>
 
     <div class="tv-footer">
@@ -571,7 +591,7 @@ function renderSparkline(closes, volumes, isPositive) {
       const x = (i / (volumes.length - 1)) * viewWidth;
       const h = (v / maxVol) * (viewHeight * 0.4); // Max 40% height
       const y = viewHeight - h;
-      return `<rect x="${x}" y="${y}" width="${Math.max(1, barWidth)}" height="${h}" fill="#fff" fill-opacity="0.1" />`;
+      return `<rect x="${x}" y="${y}" width="${Math.max(1, barWidth)}" height="${h}" fill="#fff" fill-opacity="0.05" />`;
     }).join('');
   }
 
