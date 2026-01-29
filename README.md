@@ -5,9 +5,9 @@
 ## 🛠 Permission Justification
 
 In accordance with the Single Purpose Policy, TickerView only requests the following essential permissions:
-- **Host Permissions (`yahoo.com`)**: Required to fetch real-time price, technical indicators, and chart data directly from the API.
+- **Host Permissions (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`)**: Strictly scoped to fetch real-time price, technical indicators, and chart data directly from the Yahoo Finance API.
 - **Content Scripts**: Explicitly limited to major financial and social platforms (Twitter, Reddit, Yahoo Finance, etc.) to automatically detect tickers where they are most relevant.
-- **activeTab Permission**: Allows the user to manually trigger TickerView on any other website by clicking the extension icon, providing a privacy-first fallback.
+- **activeTab Permission**: Grants the extension temporary access to the current tab when the user interacts with it, ensuring a privacy-first integration.
 
 ---
 
@@ -49,7 +49,7 @@ The TickerView Sentiment Radar uses a sophisticated trader-centric algorithm to 
 The "Sentiment Badge" (visible next to the ticker symbol) is triggered based on the final calculated average score:
 - **[BULLISH] (Green)**: Score > `+0.1`. Requires fresh positive catalysts like earnings beats, upgrades, or major partnerships.
 - **[BEARISH] (Red)**: Score < `-0.1`. Triggered by heavy negative news such as earnings misses, lawsuits, layoffs, or analyst downgrades.
-- **[NEUTRAL] (Yellow)**: Score between `-0.1` and `+0.1`. This is the default state when news is balanced or "stale" (older than 48 hours).
+- **[NEUTRAL] (Orange)**: Score between `-0.1` and `+0.1`. This is the default state when news is balanced or "stale" (older than 48 hours).
 
 ### Analyzed Categories:
 - **Corporate**: Earnings beats/misses, M&A activity, Guidance, and CEO changes.
@@ -64,7 +64,7 @@ The "Sentiment Badge" (visible next to the ticker symbol) is triggered based on 
 TickerView doesn't just provide data; it looks professional while doing so:
 - **Glassmorphism**: A sleek, translucent backdrop with high-blur (20px) and saturation (180%).
 - **Monospace Typography**: optimized for data readability using `SF Mono` or `JetBrains Mono`.
-- **Golden Glow Highlights**: Tickers are subtly highlighted with a golden glow, making it easy to identify actionable symbols without cluttering the page.
+- **Vibrant Orange Highlights**: Tickers are subtly highlighted with a vibrant orange, making it easy to identify actionable symbols without cluttering the page.
 - **Premium Color Palette**: Curated colors for price action (`#00ffa3` for gains, `#ff4d4d` for losses) and signals.
 
 ## 🛠️ Tech Stack
