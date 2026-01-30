@@ -22,7 +22,7 @@ function scanAndHighlight(node) {
     return;
   }
 
-  if (node.nodeType === Node.TEXT_NODE && node.parentElement && !['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT'].includes(node.parentElement.tagName)) {
+  if (node.nodeType === Node.TEXT_NODE && node.parentElement && !['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT'].includes(node.parentElement.tagName) && !node.parentElement.isContentEditable) {
     const text = node.nodeValue;
     if (TICKER_REGEX.test(text)) {
       const fragment = document.createDocumentFragment();

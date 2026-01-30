@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TickerView",
-  "version": "1.1",
+  "version": "1.1.1",
   "description": "Hover over stock tickers to see real-time technical stats and charts.",
   "permissions": [],
   "host_permissions": [

@@ -1,4 +1,4 @@
-# TickerView
+# TickerView ![Version](https://img.shields.io/badge/version-1.1.1-blue.svg)
 
 **Single Purpose Description:** TickerView is a Chrome extension that provides real-time technical and fundamental stock data in a hover modal when a user interacts with stock tickers on any webpage.
 
@@ -86,3 +86,7 @@ TickerView doesn't just provide data; it looks professional while doing so:
 ---
 
 *Powered by Scap Cerberus*
+
+---
+
+[View Changelog](CHANGELOG.md)
