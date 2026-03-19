@@ -202,8 +202,9 @@ function escapeHtml(text) {
 }
 
 function renderModalData(data, chart) {
-  const isPositive = (data.regularMarketChange || 0) >= 0;
-  const changeColor = isPositive ? '#00ffa3' : '#ff4d4d';
+  const isPositive = (data.regularMarketChange || data.regularMarketChangePercent || 0) >= 0;
+  const hasChange = data.regularMarketChange != null || data.regularMarketChangePercent != null;
+  const changeColor = hasChange ? (isPositive ? '#00ffa3' : '#ff4d4d') : '#888';
 
   // Helper for safe decimal formatting
   const f = (val, dec = 2, prefix = '') => {
@@ -262,9 +263,10 @@ function renderModalData(data, chart) {
   const vwapDist = data.vwapDist;
   let vwapDisplay = 'N/A';
   if (vwap) {
-    const vColor = vwapDist >= 0 ? '#00ffa3' : '#ff4d4d';
-    const vSign = vwapDist >= 0 ? '+' : '';
-    vwapDisplay = `${f(vwap, 2, '$')} <span style="color: ${vColor}; font-size: 0.9em;">(${vSign}${f(vwapDist, 1)}%)</span>`;
+    const vColor = vwapDist != null ? (vwapDist >= 0 ? '#00ffa3' : '#ff4d4d') : '#888';
+    const vSign = vwapDist != null && vwapDist >= 0 ? '+' : '';
+    const vwapPctDisplay = vwapDist != null ? `(${vSign}${f(vwapDist, 1)}%)` : '';
+    vwapDisplay = `${f(vwap, 2, '$')} ${vwapPctDisplay ? `<span style="color: ${vColor}; font-size: 0.9em;">${vwapPctDisplay}</span>` : ''}`;
   }
 
   // RSI
@@ -299,11 +301,12 @@ function renderModalData(data, chart) {
   // Extended Hours
   let extDisplay = '';
   if (data.extendedPrice) {
-    const extColor = (data.extendedChangePct || 0) >= 0 ? '#00ffa3' : '#ff4d4d';
-    const extSign = (data.extendedChangePct || 0) >= 0 ? '+' : '';
+    const extColor = data.extendedChangePct != null ? (data.extendedChangePct >= 0 ? '#00ffa3' : '#ff4d4d') : '#888';
+    const extSign = data.extendedChangePct != null && data.extendedChangePct >= 0 ? '+' : '';
+    const extPctDisplay = data.extendedChangePct != null ? `(${extSign}${f(data.extendedChangePct, 1)}%)` : '';
     extDisplay = `<div style="font-size: 10px; color: #888; margin-top: 2px;">
          Ext: <span style="color:#fff">${f(data.extendedPrice, 2, '$')}</span> 
-         <span style="color: ${extColor}">(${extSign}${f(data.extendedChangePct, 1)}%)</span>
+         ${extPctDisplay ? `<span style="color: ${extColor}">${extPctDisplay}</span>` : ''}
       </div>`;
   }
 
@@ -360,7 +363,12 @@ function renderModalData(data, chart) {
     <div class="tv-price-section">
         <span class="tv-price">${f(data.regularMarketPrice, 2, '$')}</span>
         <span class="tv-change" style="color: ${changeColor}">
-          ${isPositive ? '+' : ''}${f(data.regularMarketChange, 2)}${f(data.regularMarketChangePercent, 2, ' (') + '%)'}
+          ${data.regularMarketChange != null && data.regularMarketChangePercent != null ? 
+            `${isPositive ? '+' : ''}${f(data.regularMarketChange, 2)} (${f(data.regularMarketChangePercent, 2)}%)` : 
+            data.regularMarketChangePercent != null ? 
+            `${isPositive ? '+' : ''}${f(data.regularMarketChangePercent, 2)}%` : 
+            data.regularMarketChange != null ? 
+            `${isPositive ? '+' : ''}${f(data.regularMarketChange, 2)}` : 'N/A'}
         </span>
         ${extDisplay}
       </div>
@@ -468,7 +476,7 @@ function renderModalData(data, chart) {
       </div>
       <div class="tv-stat-item">
         <span class="tv-stat-label">ATR</span>
-        <span class="tv-stat-value">${f(data.atr, 2, '$')}<span style="opacity: 0.7; font-size: 0.9em"> (${f(data.atrPct, 1)}%)</span></span>
+        <span class="tv-stat-value">${f(data.atr, 2, '$')}${data.atrPct != null ? `<span style="opacity: 0.7; font-size: 0.9em"> (${f(data.atrPct, 1)}%)</span>` : ''}</span>
       </div>
        <div class="tv-stat-item">
         <span class="tv-stat-label">VWAP</span>

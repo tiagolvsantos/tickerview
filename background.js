@@ -33,18 +33,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // SPY Cache Logic
         if (!globalThis.spyCache) globalThis.spyCache = { change: null, time: 0 };
         const fetchSpy = async () => {
-          // const now = Date.now(); // 'now' is already defined above
           if (globalThis.spyCache.change !== null && (now - globalThis.spyCache.time < 300000)) {
             return globalThis.spyCache.change;
           }
           try {
-            const r = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=1d');
+            const r = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=5d');
             const d = await r.json();
-            const m = d.chart.result[0].meta;
-            const change = ((m.regularMarketPrice - m.chartPreviousClose) / m.chartPreviousClose) * 100;
-            globalThis.spyCache = { change: change, time: now };
-            return change;
-          } catch (e) { return null; }
+            const m = d.chart?.result?.[0]?.meta;
+            if (m && m.regularMarketPrice != null && m.chartPreviousClose != null) {
+              const change = ((m.regularMarketPrice - m.chartPreviousClose) / m.chartPreviousClose) * 100;
+              globalThis.spyCache = { change: change, time: now };
+              return change;
+            }
+          } catch (e) {} 
+          return null;
         };
 
         const [chartRes, intraRes, sumRes, spyChange, newsRes] = await Promise.all([
@@ -373,13 +375,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           let manualChangePct = meta.regularMarketChangePercent;
 
           // Stronger Manual Calculation if meta is weird (e.g. range=2y meta might be skewed)
-          if (closes.length >= 2) {
-            const lastClose = closes[closes.length - 2]; // Previous Day Close
+          const validCloses = closes.filter(c => c != null);
+          if (validCloses.length >= 2) {
+            const lastClose = validCloses[validCloses.length - 2]; // Previous Day Close
             if (lastClose) {
               const current = meta.regularMarketPrice;
               manualChange = current - lastClose;
               manualChangePct = ((current - lastClose) / lastClose) * 100;
             }
+          }
+
+          // Fallback to chartPreviousClose if still null/undefined
+          if (manualChange == null && meta.regularMarketPrice != null && meta.chartPreviousClose != null) {
+            manualChange = meta.regularMarketPrice - meta.chartPreviousClose;
+            manualChangePct = ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose) * 100;
           }
 
           const finalChange = officialChange !== null ? officialChange : manualChange;
@@ -431,10 +440,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               if (now - c.time < 300000) return c.change;
             }
             try {
-              const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${etf}?interval=1d&range=1d`);
+              const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${etf}?interval=1d&range=5d`);
               const d = await r.json();
-              if (d.chart?.result?.[0]?.meta) {
-                const m = d.chart.result[0].meta;
+              const m = d.chart?.result?.[0]?.meta;
+              if (m && m.regularMarketPrice != null && m.chartPreviousClose != null) {
                 const change = ((m.regularMarketPrice - m.chartPreviousClose) / m.chartPreviousClose) * 100;
                 globalThis.sectorEtfCache.set(etf, { change, time: now });
                 return change;
@@ -444,8 +453,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           };
 
           const sectorChange = await fetchSectorPerformance(sectorEtf);
-          const relStrengthSector = (sectorChange !== null) ? (finalChangePct - sectorChange) : null;
-          const relStrengthFinal = (spyChange !== null) ? (finalChangePct - spyChange) : null;
+          const relStrengthSector = (sectorChange != null && finalChangePct != null) ? (finalChangePct - sectorChange) : null;
+          const relStrengthFinal = (spyChange != null && finalChangePct != null) ? (finalChangePct - spyChange) : null;
 
           // Extract basic price data
           quote = {
