@@ -1,0 +1,21 @@
+/* Cerberus Terminal: web/assets/zzzz_cerberus.css and styles.css.
+   Scope every token to extension surfaces; do not theme the host webpage. */
+.tv-theme, #tickerview-modal {
+  --tv-bg: #0B1220;
+  --tv-panel: #101925;
+  --tv-control: #1A1F2B;
+  --tv-border: #2E3642;
+  --tv-border-strong: #566171;
+  --tv-text: #C0C6CF;
+  --tv-bright: #EDF0F4;
+  --tv-muted: #A1ADBD;
+  --tv-dim: #8D9BAD;
+  --tv-accent: #FF6600;
+  --tv-accent-soft: rgba(255, 102, 0, .12);
+  --tv-up: #00C853;
+  --tv-down: #FF3B30;
+  --tv-warn: #FFCC00;
+  --tv-sans: 'TickerView Montserrat', 'Montserrat', 'Inter', 'Segoe UI', sans-serif;
+  --tv-mono: 'TickerView Plex', 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  color-scheme: dark;
+}

@@ -1,49 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <style>
-    body {
-      width: 250px;
-      padding: 16px;
-      font-family: -apple-system, system-ui, sans-serif;
-      background: #0a0f1a;
-      color: #fff;
-      margin: 0;
-    }
-    h2 {
-      margin: 0 0 10px 0;
-      font-size: 18px;
-      color: #007aff;
-    }
-    p {
-      font-size: 13px;
-      color: #a1a1a6;
-      line-height: 1.4;
-    }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 15px;
-      padding: 10px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 8px;
-    }
-    .dot {
-      width: 8px;
-      height: 8px;
-      background: #00ffa3;
-      border-radius: 50%;
-      box-shadow: 0 0 8px #00ffa3;
-    }
-  </style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TickerView settings</title><link rel="stylesheet" href="brand.css"><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="styles.css">
+  <script src="shared.js" defer></script><script src="content.js" defer></script><script src="popup.js" defer></script>
 </head>
-<body>
-  <h2>TickerView</h2>
-  <p>Hover over any stock ticker (e.g. $AAPL) on any webpage to see technical stats.</p>
-  <div class="status">
-    <div class="dot"></div>
-    <span>Active & Scanning</span>
-  </div>
+<body class="tv-theme tv-popup">
+  <header><img class="brand-logo" src="icons/icon128.png" alt="Cerberus logo" width="40" height="40"><div class="brand-copy"><span class="brand-eyebrow">CERBERUS</span><h1>TickerView</h1></div><span class="version">2.0.0</span></header>
+  <p id="status" role="status">Loading settings…</p>
+  <fieldset id="settings" disabled>
+    <legend class="sr-only">TickerView settings</legend>
+    <fieldset class="control-panel"><legend>Extension controls</legend>
+      <label class="switch-row"><span>Enable TickerView<small>Detect cashtags on supported sites</small></span><input type="checkbox" role="switch" id="enabled"><span class="switch-track" aria-hidden="true"></span></label>
+      <label class="switch-row site-control"><span>Enabled on <span id="site">this site</span></span><input type="checkbox" role="switch" id="siteEnabled"><span class="switch-track" aria-hidden="true"></span></label>
+    </fieldset>
+    <details class="settings-panel"><summary>Appearance <span id="appearance-summary">300 ms · Detailed</span></summary><div class="panel-body">
+      <label class="delay">Hover delay <select id="hoverDelay"><option value="0">Instant</option><option value="150">150 ms</option><option value="300">300 ms</option><option value="500">500 ms</option><option value="800">800 ms</option><option value="1500">1.5 seconds</option></select></label>
+      <label><input type="checkbox" id="compact"> Compact card</label><label><input type="checkbox" id="reducedEffects"> Reduce visual effects</label>
+    </div></details>
+    <details class="settings-panel" id="indicator-options"><summary>Visible indicators <span id="indicator-count"></span></summary><div class="panel-body">
+      <div id="presets" role="group" aria-label="Indicator presets"><button type="button" data-preset="Essential">Essential</button><button type="button" data-preset="Technical">Technical</button><button type="button" data-preset="All">All</button></div>
+      <div id="indicators"></div>
+    </div></details>
+  </fieldset>
+  <section><h2>Watchlist <span id="watch-count" class="count"></span></h2>
+    <form id="add-symbol"><label for="symbol" class="sr-only">Add a stock symbol</label><div class="row"><input id="symbol" maxlength="20" placeholder="Add a symbol, e.g. AAPL" required autocomplete="off" spellcheck="false" aria-describedby="symbol-feedback"><button type="submit">Add</button></div><p id="symbol-feedback" role="status"></p></form>
+    <div id="watchlist" class="watchlist"></div><p id="cache-note">Prices are last viewed snapshots. Open a card to refresh.</p>
+  </section>
+  <section><div class="section-heading"><h2>Recent tickers</h2><button type="button" id="clear-recent" class="text-button">Clear history</button></div><div id="recent" class="symbols"></div></section>
+  <footer><span class="footer-brand">CERBERUS</span><details id="keyboard-help"><summary>Keyboard help</summary><p><kbd>Enter</kbd> adds a symbol or opens its card. <kbd>Esc</kbd> closes a card. On a page, focus a cashtag and press <kbd>Enter</kbd> or <kbd>Space</kbd>.</p></details></footer>
 </body>
 </html>
