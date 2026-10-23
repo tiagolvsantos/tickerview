@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-10-23
+
+Major release introducing the Cerberus redesign, expanded market data, and X Pro / OldTweetDeck support.
+
+### Changed
+- Replaced the repository screenshots with six 1280 × 800 feature images covering the stock card, watchlist, fundamentals, controls, news and research, and TweetDeck highlighting; refreshed the README gallery and reproducible screenshot generator.
+- Bumped the Chrome manifest, popup, and development package versions to 2.0.0.
+- Keep Node.js and npm limited to development tools; the extension runs directly in Chrome without a build step.
+
+### Added
+- Expanded Fundamentals section with valuation multiples, EPS, revenue, growth, margins, return on equity, cash flow, cash, and debt; reporting currency is shown separately from the stock quote currency.
+- Reorganized popup with master/site switches, collapsible appearance controls, indicator presets and groups, cached company/price watchlist rows, inline symbol validation, direct popup cards, recent-symbol saving, and Clear history.
+- Cerberus Terminal branding: original three-headed logo in all Chrome icon sizes, navy/silver/orange theme, bundled Montserrat and IBM Plex Mono fonts, and redesigned popup and stock card.
+- Pin, save, refresh, close, keyboard opening, Escape dismissal, and keyboard chart inspection.
+- Interactive chart timeframes, crosshair, aligned volume bars, and timestamps.
+- Settings popup with per-site controls, hover delay, compact mode, reduced effects, and indicator selection.
+- Persistent local watchlist, recent symbols, source freshness labels, and explainable headline sentiment.
+- Developer-only calculation, cache, service-worker, and Chrome UI tests.
+
+### Performance
+- Progressive quote, technical, and detail loading; optional request failures preserve usable data.
+- Shared in-flight requests, separate resource TTLs, bounded persistent cache, request timeouts, and failure cooldowns.
+- Batched, time-budgeted DOM scanning with text-change detection and editable-area exclusions.
+- Reuse daily history and rebuild the current session from fresh intraday bars; parse fundamentals from inert structured JSON on the public statistics page.
+- Pause quote refresh in hidden tabs and avoid duplicate scanning inside embedded frames.
+
+### Fixed
+- Keep native TweetDeck cashtag links and their nested dollar-sign/ticker spans orange when host link styles override their color.
+- Detect split-span cashtag links in X Pro / OldTweetDeck without replacing their markup, handle recycled rows and body replacement, and retain pinned cards during column scrolling.
+- Clean legacy currency false positives from saved/recent symbols and preserve focus when cached watchlist rows update.
+- Restore fundamentals through the structured payload on Yahoo’s public statistics page, identify the source and short-interest date, and render available analyst mean targets.
+- Omit mixed-currency ADR price-to-sales ratios instead of displaying misleading multiples.
+- Preserve last-session VWAP when premarket trading-period metadata advances to the following day.
+- Use Cerberus orange for every chart line and list unavailable metrics explicitly instead of repeated N/A cells.
+- Stop highlighting currency amounts such as `$1B`, `$5B`, and `$5.8B` as stock tickers while preserving exchange-qualified numeric symbols such as `$7203.T`.
+- Ignore stale responses after closing or switching cards.
+- Align price/volume data by timestamp and preserve valid zero values.
+- Use exchange-local session dates for gaps, prior-session levels, and benchmark comparisons.
+- Exclude current session from average-volume baseline and label volume ratio accurately.
+- Correct headline decay, expire old evidence, match whole words, and filter duplicate/unrelated headlines.
+- Replace inline click handlers with native controls and safe event listeners.
+
 ## [1.1.2] - 2026-03-19
 ### Fixed
 - **Percentage Display Fallbacks**: Fixed UI bug where `+N/A(N/A%)` rendered when partial Yahoo Finance data is present. It now gracefully falls back to raw daily percentage calculation if the official previous market close change is broken.

@@ -1,587 +1,201 @@
-// background.js - Native Fetch Version (Technical Indicators)
-
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "fetchStockData") {
-    const ticker = request.ticker;
-
-    // Global Cache for Ticker Data to prevent spam checks
-    // This Map will persist across calls to the listener.
-    if (!globalThis.tickerCache) {
-      globalThis.tickerCache = new Map();
-    }
-    const tickerCache = globalThis.tickerCache;
-
-    const fetchData = async () => {
-      // 1. Check Cache (60s TTL)
-      const now = Date.now();
-      if (tickerCache.has(ticker)) {
-        const c = tickerCache.get(ticker);
-        if (now - c.time < 60000) { // 60 seconds
-          return c.data;
-        }
-      }
-
-      try {
-        // 2. Parallel: Fetch Chart (Techs), Intra (VWAP), Summary (Cap/Earn), SPY (RS)
-        const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=2y`;
-        const intraUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=5m&range=1d`;
-        // Use v7 which is often more stable
-        // Institutional Modules: Chart, Intra, Profiles, Stats, and Financials
-        const sumUrl = `https://query1.finance.yahoo.com/v7/finance/quoteSummary/${ticker}?modules=summaryDetail,price,calendarEvents,summaryProfile,assetProfile,defaultKeyStatistics,financialData`;
-        const newsUrl = `https://query2.finance.yahoo.com/v1/finance/search?q=${ticker}`;
-
-        // SPY Cache Logic
-        if (!globalThis.spyCache) globalThis.spyCache = { change: null, time: 0 };
-        const fetchSpy = async () => {
-          if (globalThis.spyCache.change !== null && (now - globalThis.spyCache.time < 300000)) {
-            return globalThis.spyCache.change;
-          }
-          try {
-            const r = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=5d');
-            const d = await r.json();
-            const m = d.chart?.result?.[0]?.meta;
-            if (m && m.regularMarketPrice != null && m.chartPreviousClose != null) {
-              const change = ((m.regularMarketPrice - m.chartPreviousClose) / m.chartPreviousClose) * 100;
-              globalThis.spyCache = { change: change, time: now };
-              return change;
-            }
-          } catch (e) {} 
-          return null;
-        };
-
-        const [chartRes, intraRes, sumRes, spyChange, newsRes] = await Promise.all([
-          fetch(chartUrl),
-          fetch(intraUrl),
-          fetch(sumUrl),
-          fetchSpy(),
-          fetch(newsUrl)
-        ]);
-
-        const chartData = await chartRes.json();
-        const intraData = await intraRes.json();
-        // Handle sumRes errors gracefully
-        let sumData = {};
-        try { sumData = await sumRes.json(); } catch (e) { }
-        let newsData = {};
-        try { newsData = await newsRes.json(); } catch (e) { }
-
-        let quote = {};
-        let meta = {};
-        let volumes = [];
-        let closes = [];
-        let highs = [];
-        let lows = [];
-        let timestamps = []; // Need timestamps for Gap verification
-        // opens array is now only used for fallback gap calculation, declared locally if needed
-
-        // Parse Chart Data
-        if (chartData.chart && chartData.chart.result && chartData.chart.result[0]) {
-          const result = chartData.chart.result[0];
-          meta = result.meta;
-          timestamps = result.timestamp || [];
-
-          if (result.indicators && result.indicators.quote && result.indicators.quote[0]) {
-            const indicators = result.indicators.quote[0];
-            closes = indicators.close || [];
-            highs = indicators.high || [];
-            lows = indicators.low || [];
-            // opens = indicators.open || [];
-            volumes = indicators.volume || [];
-          }
-
-          // --- Techs ---
-
-          // 1. Simple Moving Average (SMA)
-          const calculateSMA = (data, p) => {
-            const c = data.filter(v => v != null && v != undefined); if (c.length < p) return null;
-            return c.slice(-p).reduce((a, b) => a + b, 0) / p;
-          };
-
-          // 2. Relative Strength Index (RSI)
-          const calculateRSI = (prices, p = 14) => {
-            const c = prices.filter(v => v != null && v != undefined); if (c.length < p + 1) return null;
-            let g = 0, l = 0; for (let i = 1; i <= p; i++) { const d = c[i] - c[i - 1]; if (d > 0) g += d; else l += Math.abs(d); }
-            let ag = g / p, al = l / p;
-            for (let i = p + 1; i < c.length; i++) { const d = c[i] - c[i - 1]; ag = ((ag * (p - 1)) + (d > 0 ? d : 0)) / p; al = ((al * (p - 1)) + (d < 0 ? Math.abs(d) : 0)) / p; }
-            if (al === 0) return 100; return 100 - (100 / (1 + ag / al));
-          };
-
-          // 3. Average True Range (ATR)
-          const calculateATR = (h, l, c, p = 14) => {
-            const t = []; for (let i = 1; i < c.length; i++) {
-              if (h[i] == null || l[i] == null || c[i - 1] == null) continue;
-              t.push(Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])));
-            }
-            if (t.length < p) return null; return t.slice(-p).reduce((a, b) => a + b, 0) / p;
-          };
-
-          // 4. Standard Deviation
-          const calculateStdDev = (data, p) => {
-            const c = data.filter(v => v != null && v != undefined).slice(-p);
-            if (c.length < p) return null;
-            const mean = c.reduce((a, b) => a + b, 0) / p;
-            const variance = c.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / p;
-            return Math.sqrt(variance);
-          };
-
-          // 5. ADR % (Average Daily Range)
-          const calculateADR = (h, l, p = 20) => {
-            const t = [];
-            for (let i = 0; i < h.length; i++) {
-              if (h[i] == null || l[i] == null || l[i] === 0) continue;
-              t.push((h[i] / l[i] - 1) * 100);
-            }
-            if (t.length < p) return null;
-            return t.slice(-p).reduce((a, b) => a + b, 0) / p;
-          };
-
-          const ma20 = calculateSMA(closes, 20);
-          const ma50 = calculateSMA(closes, 50);
-          const ma200 = calculateSMA(closes, 200);
-          const rsi = calculateRSI(closes, 14);
-          const atr = calculateATR(highs, lows, closes, 14);
-          const stdDev20 = calculateStdDev(closes, 20);
-
-          // Mean Reversion & BB
-          let zScore = null;
-          let bbPct = null;
-          const price = meta.regularMarketPrice;
-          if (ma20 && stdDev20 && stdDev20 > 0) {
-            zScore = (price - ma20) / stdDev20;
-            const upper = ma20 + (2 * stdDev20);
-            const lower = ma20 - (2 * stdDev20);
-            bbPct = ((price - lower) / (upper - lower)) * 100;
-          }
-
-          // ADR
-          const adrPct = calculateADR(highs, lows, 20);
-
-          // New: ATR Percent
-          const atrPct = (atr && price) ? (atr / price) * 100 : null;
-
-          // New: RVOL
-          const avgVol50 = calculateSMA(volumes, 50);
-          const rvol = (avgVol50 && avgVol50 > 0) ? ((meta.regularMarketVolume || 0) / avgVol50) : null;
-
-          // New: Distance to 200MA %
-          const dist200 = (ma200 && price) ? ((price - ma200) / ma200) * 100 : null;
-
-          // Shared vars for summary
-          let marketCap = null, earningsDate = null, gapPct = null, officialChange = null, officialChangePct = null;
-          let extendedPrice = null, extendedChangePct = null, sector = null, industry = null, longName = meta.symbol;
-          let shortFloatPct = null, shortRatio = null;
-          let targetLow = null, targetMean = null, targetHigh = null, recKey = null, analystCount = null;
-
-          // New: Key Levels (Yesterday High/Low)
-          let keyLevelStatus = null, yHigh = null, yLow = null;
-          if (highs.length >= 2 && lows.length >= 2) {
-            yHigh = highs[highs.length - 2];
-            yLow = lows[lows.length - 2];
-
-            if (price > yHigh) keyLevelStatus = "Breakout";
-            else if (price < yLow) keyLevelStatus = "Breakdown";
-            else keyLevelStatus = "Inside";
-          }
-
-          // --- VWAP & Intraday Chart Data ---
-          let vwap = null, vwapDist = null;
-          let intraCloses = [];
-          let intraVolumes = []; // For Volume Bars
-
-          if (intraData.chart?.result?.[0]?.indicators?.quote?.[0]) {
-            const q = intraData.chart.result[0].indicators.quote[0];
-            let cpv = 0;
-            let cv = 0;
-            const icloses = q.close || [];
-            const ivols = q.volume || [];
-
-            // Capture Intraday Series
-            intraCloses = icloses.filter(x => x !== null);
-            intraVolumes = ivols.filter(x => x !== null);
-
-            for (let i = 0; i < icloses.length; i++) {
-              if (icloses[i] !== null && ivols[i] !== null) {
-                cpv += icloses[i] * ivols[i];
-                cv += ivols[i];
-              }
-            }
-
-            if (cv > 0) {
-              vwap = cpv / cv;
-              vwapDist = ((meta.regularMarketPrice - vwap) / vwap) * 100;
-            }
-          }
-
-          // Failsafe mappings for the most common tickers to avoid "N/A"
-          const failsafeMap = {
-            'MSFT': { sector: 'Technology', name: 'Microsoft Corporation' },
-            'AAPL': { sector: 'Technology', name: 'Apple Inc.' },
-            'NVDA': { sector: 'Technology', name: 'NVIDIA Corporation', industry: 'Semiconductors' },
-            'ORCL': { sector: 'Technology', name: 'Oracle Corporation' },
-            'AMD': { sector: 'Technology', name: 'Advanced Micro Devices', industry: 'Semiconductors' },
-            'AVGO': { sector: 'Technology', name: 'Broadcom Inc.', industry: 'Semiconductors' },
-            'CRM': { sector: 'Technology', name: 'Salesforce, Inc.' },
-            'TSLA': { sector: 'Consumer Cyclical', name: 'Tesla, Inc.' },
-            'GOOGL': { sector: 'Communication Services', name: 'Alphabet Inc.' },
-            'GOOG': { sector: 'Communication Services', name: 'Alphabet Inc.' },
-            'AMZN': { sector: 'Consumer Cyclical', name: 'Amazon.com, Inc.' },
-            'META': { sector: 'Communication Services', name: 'Meta Platforms, Inc.' }
-          };
-
-          if (sumData.quoteSummary?.result?.[0]) {
-            const s = sumData.quoteSummary.result[0];
-
-            // Better extraction of Company Profile
-            const profile = s.summaryProfile || s.assetProfile;
-            if (profile) {
-              sector = profile.sector || null;
-              industry = profile.industry || null;
-            }
-
-            if (s.price) {
-              longName = s.price.longName || s.price.shortName || s.summaryDetail?.longName || meta.symbol;
-              if (s.price.regularMarketChange?.raw !== undefined) officialChange = s.price.regularMarketChange.raw;
-              if (s.price.regularMarketChangePercent?.raw !== undefined) officialChangePct = s.price.regularMarketChangePercent.raw * 100;
-
-              // Extended Hours
-              if (s.price.marketState === 'PRE' && s.price.preMarketPrice?.raw) {
-                extendedPrice = s.price.preMarketPrice.raw;
-                extendedChangePct = s.price.preMarketChangePercent?.raw ? s.price.preMarketChangePercent.raw * 100 : null;
-              } else if ((s.price.marketState === 'POST' || s.price.marketState === 'CLOSED') && s.price.postMarketPrice?.raw) {
-                extendedPrice = s.price.postMarketPrice.raw;
-                extendedChangePct = s.price.postMarketChangePercent?.raw ? s.price.postMarketChangePercent.raw * 100 : null;
-              }
-            }
-
-            if (s.defaultKeyStatistics) {
-              const k = s.defaultKeyStatistics;
-              // Fix: 0 is falsy, check for undefined instead
-              if (k.shortPercentOfFloat?.raw !== undefined) shortFloatPct = k.shortPercentOfFloat.raw * 100;
-              if (k.shortRatio?.raw !== undefined) shortRatio = k.shortRatio.raw;
-            }
-
-            marketCap = s.summaryDetail?.marketCap?.fmt || s.price?.marketCap?.fmt;
-
-            // Aggressive Earnings Detection (Check all modules)
-            const e1 = s.calendarEvents?.earnings?.earningsDate?.[0]?.fmt;
-            const e2 = s.summaryDetail?.nextEarningsDate?.fmt;
-            const e3 = s.financialData?.earningsAnnouncement?.fmt;
-            earningsDate = e1 || e2 || e3 || null;
-
-            if (!earningsDate && (s.summaryDetail?.lastEarningsDate || s.summaryDetail?.previousEarningsDate)) {
-              // If we have a past date, it helps determine 'Just Reported'
-              earningsDate = s.summaryDetail.lastEarningsDate?.fmt || s.summaryDetail.previousEarningsDate?.fmt;
-            }
-
-            if (s.price?.regularMarketOpen?.raw && s.price?.regularMarketPreviousClose?.raw) {
-              gapPct = ((s.price.regularMarketOpen.raw - s.price.regularMarketPreviousClose.raw) / s.price.regularMarketPreviousClose.raw) * 100;
-            }
-
-            if (s.financialData) {
-              const f = s.financialData;
-              targetLow = f.targetLowPrice?.raw || null;
-              targetMean = f.targetMeanPrice?.raw || null;
-              targetHigh = f.targetHighPrice?.raw || null;
-              recKey = f.recommendationKey ? f.recommendationKey.toUpperCase().replace(/_/g, ' ') : null;
-              analystCount = f.numberOfAnalystOpinions?.raw || null;
-            }
-          }
-
-          // Apply Failsafe if API failed or returned empty
-          if (!sector && failsafeMap[ticker]) {
-            sector = failsafeMap[ticker].sector;
-            industry = failsafeMap[ticker].industry || industry;
-          }
-          if ((!longName || longName === ticker) && failsafeMap[ticker]) {
-            longName = failsafeMap[ticker].name;
-          }
-
-          // New: Search API Fallback (Very robust for Names/Sectors/Industry)
-          if (newsData.quotes && newsData.quotes.length > 0) {
-            const bestMatch = newsData.quotes.find(q => q.symbol === ticker) || newsData.quotes[0];
-            if (bestMatch) {
-              if (!longName || longName === ticker) {
-                longName = bestMatch.longname || bestMatch.shortname || bestMatch.name || longName;
-              }
-              if (!sector) sector = bestMatch.sector || bestMatch.sectorDisp;
-              if (!industry) industry = bestMatch.industry || bestMatch.industryDisp;
-            }
-          }
-
-          // Earnings Logic (Failsafe & Status)
-          let earningsStatus = null;
-          let earningsDays = null;
-          if (earningsDate) {
-            try {
-              const eDate = new Date(earningsDate);
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              const diffTime = eDate - today;
-              earningsDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-              if (earningsDays === 0) earningsStatus = "Today";
-              else if (earningsDays === -1) earningsStatus = "Yesterday (Just Reported)";
-              else if (earningsDays < -1 && earningsDays > -5) earningsStatus = "Just Reported";
-            } catch (e) { }
-          }
-
-          // Fallback Gap with strict Date Checking
-          if (gapPct === null && result.indicators.quote && result.indicators.quote[0] && meta.chartPreviousClose) {
-            const opens = result.indicators.quote[0].open || [];
-            if (timestamps.length > 0 && opens.length > 0) {
-              const lastTs = timestamps[timestamps.length - 1];
-              const lastOpen = opens[opens.length - 1];
-
-              // Check if last candle is from Today (or same day as meta.regularMarketTime)
-              if (lastOpen) {
-                const candleDate = new Date(lastTs * 1000).toDateString();
-                const todayDate = new Date().toDateString();
-                // Only show Gap if the candle is FRESH (Today).
-                // If it's Saturday and last candle Fri, we show Fri Gap? Yes, that's standard.
-                // If it's Monday morning Pre-market and last candle Fri? Then NO Gap.
-                // Simple heuristic: Is candle 'Today'?
-                if (candleDate === todayDate) {
-                  gapPct = ((lastOpen - meta.chartPreviousClose) / meta.chartPreviousClose) * 100;
-                }
-              }
-            }
-          }
-
-          // Fallback Scraping for Market Cap if Null
-          if (!marketCap) {
-            const webUrl = `https://finance.yahoo.com/quote/${ticker}`;
-            try {
-              const webRes = await fetch(webUrl);
-              const webHtml = await webRes.text();
-              const extract = (patterns) => {
-                if (!Array.isArray(patterns)) patterns = [patterns];
-                for (let p of patterns) {
-                  const match = webHtml.match(p);
-                  if (match && match[1]) return match[1];
-                }
-                return null;
-              };
-              marketCap = extract([
-                /data-test="MARKET_CAP-value"[^>]*>([^<]+)</,
-                /Market Cap(?:.|[\r\n])*?value="([^"]+)"/,
-                />Market Cap<.*?<span[^>]*>([^<]+)<\/span>/
-              ]);
-            } catch (e) { console.log("Scrape fallback failed"); }
-          }
-
-          // Resolve Final Change (Official vs Manual)
-          // Fallback: Use Chart Data [Last - 1] as Previous Close if Official is missing
-          let manualChange = meta.regularMarketChange; // Default from meta
-          let manualChangePct = meta.regularMarketChangePercent;
-
-          // Stronger Manual Calculation if meta is weird (e.g. range=2y meta might be skewed)
-          const validCloses = closes.filter(c => c != null);
-          if (validCloses.length >= 2) {
-            const lastClose = validCloses[validCloses.length - 2]; // Previous Day Close
-            if (lastClose) {
-              const current = meta.regularMarketPrice;
-              manualChange = current - lastClose;
-              manualChangePct = ((current - lastClose) / lastClose) * 100;
-            }
-          }
-
-          // Fallback to chartPreviousClose if still null/undefined
-          if (manualChange == null && meta.regularMarketPrice != null && meta.chartPreviousClose != null) {
-            manualChange = meta.regularMarketPrice - meta.chartPreviousClose;
-            manualChangePct = ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose) * 100;
-          }
-
-          const finalChange = officialChange !== null ? officialChange : manualChange;
-          const finalChangePct = officialChangePct !== null ? officialChangePct : manualChangePct;
-
-          // Sector Benchmark Intelligence (Cached & Robust)
-          const sectorMap = {
-            'technology': 'XLK',
-            'information technology': 'XLK',
-            'software': 'XLK',
-            'software—infrastructure': 'XLK',
-            'software—application': 'XLK',
-            'semiconductors': 'SMH',
-            'semiconductor': 'SMH',
-            'communication services': 'XLC',
-            'communication': 'XLC',
-            'consumer cyclical': 'XLY',
-            'consumer discretionary': 'XLY',
-            'financial services': 'XLF',
-            'financials': 'XLF',
-            'healthcare': 'XLV',
-            'energy': 'XLE',
-            'industrials': 'XLI',
-            'real estate': 'XLRE',
-            'utilities': 'XLU',
-            'basic materials': 'XLB',
-            'materials': 'XLB',
-            'consumer defensive': 'XLP',
-            'consumer staples': 'XLP'
-          };
-
-          const sKey = (sector || "").trim().toLowerCase();
-          const iKey = (industry || "").trim().toLowerCase();
-
-          // Debugging Log (Visible in Extension Background Console)
-          console.log(`[TickerView] ${ticker} | Sector: ${sector} | Industry: ${industry}`);
-
-          let sectorEtf = sectorMap[sKey] || (iKey.includes('semiconductor') ? 'SMH' : null);
-          if (iKey.includes('semiconductor') || sKey.includes('semiconductor')) sectorEtf = 'SMH';
-          if (iKey.includes('software') || sKey.includes('software')) sectorEtf = 'XLK';
-
-          // Sector Performance Cache (5m)
-          if (!globalThis.sectorEtfCache) globalThis.sectorEtfCache = new Map();
-          const fetchSectorPerformance = async (etf) => {
-            if (!etf) return null;
-            const now = Date.now();
-            if (globalThis.sectorEtfCache.has(etf)) {
-              const c = globalThis.sectorEtfCache.get(etf);
-              if (now - c.time < 300000) return c.change;
-            }
-            try {
-              const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${etf}?interval=1d&range=5d`);
-              const d = await r.json();
-              const m = d.chart?.result?.[0]?.meta;
-              if (m && m.regularMarketPrice != null && m.chartPreviousClose != null) {
-                const change = ((m.regularMarketPrice - m.chartPreviousClose) / m.chartPreviousClose) * 100;
-                globalThis.sectorEtfCache.set(etf, { change, time: now });
-                return change;
-              }
-            } catch (e) { }
-            return null;
-          };
-
-          const sectorChange = await fetchSectorPerformance(sectorEtf);
-          const relStrengthSector = (sectorChange != null && finalChangePct != null) ? (finalChangePct - sectorChange) : null;
-          const relStrengthFinal = (spyChange != null && finalChangePct != null) ? (finalChangePct - spyChange) : null;
-
-          // Extract basic price data
-          quote = {
-            symbol: meta.symbol,
-            longName: longName,
-            sector: sector,
-            industry: industry,
-            regularMarketPrice: meta.regularMarketPrice,
-            regularMarketChange: finalChange,
-            regularMarketChangePercent: finalChangePct,
-            regularMarketVolume: meta.regularMarketVolume || 0,
-            fiftyTwoWeekRange: (meta.fiftyTwoWeekLow && meta.fiftyTwoWeekHigh) ?
-              `${meta.fiftyTwoWeekLow.toFixed(2)} - ${meta.fiftyTwoWeekHigh.toFixed(2)}` : null,
-
-            // Extended Hours
-            extendedPrice,
-            extendedChangePct,
-
-            // Calculated values
-            fiftyDayAverage: ma50,
-            twoHundredDayAverage: ma200,
-            dist200, rvol, rsi, atr, atrPct, relStrength: relStrengthFinal, relStrengthSector, sectorEtf, keyLevelStatus, vwap, vwapDist, gapPct,
-            zScore, bbPct, adrPct,
-
-            marketCap: marketCap || null,
-            earningsDate: earningsDate || null,
-            earningsDays: earningsDays,
-            earningsStatus: earningsStatus,
-            shortFloatPct: shortFloatPct,
-            shortRatio: shortRatio,
-            targetLow, targetMean, targetHigh, recKey, analystCount,
-            categorySentiment: (() => {
-              const items = newsData.news || [];
-              const nowSeconds = Math.floor(Date.now() / 1000);
-
-              const categories = {
-                corporate: { keywords: ['earnings', 'dividend', 'buyback', 'merger', 'acquisition', 'layoff', 'guidance', 'revenue', 'profit', 'beat', 'miss', 'ceo', 'product', 'launch', 'partnership'], score: 0, count: 0 },
-                macro: { keywords: ['inflation', 'cpi', 'fed', 'rates', 'gdp', 'unemployment', 'economy', 'interest', 'yield', 'treasury', 'debt'], score: 0, count: 0 },
-                regulation: { keywords: ['sec', 'lawsuit', 'fine', 'court', 'antitrust', 'regulator', 'legal', 'probe', 'investigation', 'compliance'], score: 0, count: 0 },
-                retail: { keywords: ['reddit', 'squeeze', 'retail', 'moon', 'rocket', 'pump', 'dump', 'trending', 'social', 'community'], score: 0, count: 0 }
-              };
-
-              // Weighted Word Intensity
-              const posWeights = { 'surge': 2.0, 'breakout': 2.0, 'moon': 2.0, 'beat': 1.5, 'growth': 1.2, 'buy': 1.2, 'positive': 1.0, 'climb': 1.0, 'strong': 1.2, 'higher': 0.8, 'profit': 1.0, 'optimistic': 1.0, 'partnership': 1.5, 'upgrade': 1.5, 'innovative': 1.0, 'subscription': 1.2 };
-              const negWeights = { 'crash': 2.5, 'plunge': 2.0, 'slump': 1.8, 'miss': 1.5, 'layoff': 2.0, 'fine': 2.0, 'lawsuit': 1.5, 'negative': 1.0, 'drop': 1.0, 'fall': 0.8, 'underperform': 1.5, 'risk': 1.2, 'inflation': 1.0, 'downgrade': 1.5, 'bankruptcy': 2.5, 'insolvency': 2.5, 'debt': 1.0 };
-
-              let totalScore = 0;
-              let totalWeight = 0;
-
-              items.forEach(item => {
-                const title = (item.title || "").toLowerCase();
-                const pubTime = item.providerPublishTime || (nowSeconds - 86400); // Default 1 day old
-
-                // Time Decay: News from 1hr ago (1.0 weight) -> 24hr ago (0.2 weight)
-                const ageHours = (nowSeconds - pubTime) / 3600;
-                const timeDecay = Math.max(0.1, 1 - (ageHours / 48)); // Decay over 48 hours
-
-                let itemScore = 0;
-                Object.keys(posWeights).forEach(w => { if (title.includes(w)) itemScore += posWeights[w]; });
-                Object.keys(negWeights).forEach(w => { if (title.includes(w)) itemScore -= negWeights[w]; });
-
-                const weightedScore = itemScore * timeDecay;
-
-                if (itemScore !== 0) {
-                  totalScore += weightedScore;
-                  totalWeight += timeDecay;
-                }
-
-                // Associate with categories
-                Object.keys(categories).forEach(cat => {
-                  if (categories[cat].keywords.some(k => title.includes(k))) {
-                    categories[cat].score += weightedScore;
-                    categories[cat].count++;
-                  }
-                });
-              });
-
-              const results = {};
-              Object.keys(categories).forEach(cat => {
-                const avg = categories[cat].count > 0 ? categories[cat].score / categories[cat].count : 0;
-                results[cat] = {
-                  score: avg,
-                  label: avg > 0.1 ? 'Bullish' : (avg < -0.1 ? 'Bearish' : 'Neutral'),
-                  count: categories[cat].count
-                };
-              });
-
-              // Overall Score
-              const finalTotal = totalWeight > 0 ? totalScore / totalWeight : 0;
-              results.total = {
-                score: finalTotal,
-                label: finalTotal > 0.1 ? 'Bullish' : (finalTotal < -0.1 ? 'Bearish' : 'Neutral')
-              };
-
-              return results;
-            })()
-          };
-
-          // Determine which chart to send
-          const cleanCloses = closes.filter(v => v != null);
-          const cleanVolumes = volumes.filter(v => v != null);
-          const visualChart = (intraCloses.length > 0) ? { closes: intraCloses, volumes: intraVolumes, interval: '5m' } : { closes: cleanCloses, volumes: cleanVolumes, interval: '1d' };
-
-          const payload = {
-            success: true,
-            quote: quote,
-            chart: visualChart
-          };
-
-          // 4. Cache Result
-          tickerCache.set(ticker, { data: payload, time: Date.now() });
-
-          return payload;
-        }
-
-        return { success: false, error: "No chart data found" };
-
-      } catch (err) {
-        console.error("[Native-Bg] Error:", err);
-        return { success: false, error: err.message };
-      }
-    };
-
-    fetchData().then(data => {
-      sendResponse(data);
-    });
-
-    return true;
+import './shared.js';
+import { ResourceCache } from './cache.js';
+import { yahooSnapshot } from './fundamentals.js';
+import { normalizeSymbol, bars, priceData, technicals, benchmark, sectorETF, sentiment } from './market.js';
+
+const cache = new ResourceCache(chrome.storage.local);
+const CHARTS = { '1D': ['5m', '1d'], '5D': ['15m', '5d'], '1M': ['1d', '1mo'], '6M': ['1d', '6mo'], '1Y': ['1d', '1y'] };
+async function fetchResource(url, format = 'json') {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (!response.ok) throw new Error(`Data provider returned HTTP ${response.status}`);
+    if (format === 'json') return await response.json();
+    const html = await response.text();
+    if (html.length > 2000000) throw new Error('Fundamentals response is too large');
+    return html;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Data provider timed out');
+    throw error;
+  } finally { clearTimeout(timer); }
+}
+const fetchJSON = url => fetchResource(url);
+function chartResource(symbol, interval, range, ttl) {
+  return cache.get(`chart:${symbol}:${interval}:${range}`, ttl, async () => {
+    const data = await fetchJSON(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`);
+    const result = data.chart?.result?.[0];
+    if (!result?.meta || !bars(result).length) throw new Error(data.chart?.error?.description || 'No chart data for this symbol');
+    return result;
+  });
+}
+const daily = symbol => chartResource(symbol, '1d', '2y', 6 * 3600000);
+const intra = symbol => chartResource(symbol, '5m', '1d', 60000);
+const status = item => ({ fetchedAt: item.time, stale: item.stale, error: item.error });
+const series = (result, interval) => ({ points: bars(result), interval, timezone: result.meta.exchangeTimezoneName || 'America/New_York' });
+async function base(symbol) {
+  let resource;
+  try { resource = await intra(symbol); }
+  catch {
+    // Daily history can still supply a quote during intraday outages.
+    resource = await daily(symbol);
+    const quote = { ...priceData(resource.value), ...technicals(resource.value) };
+    await rememberQuote(symbol, quote, status(resource)).catch(() => {});
+    return { quote, chart: series(resource.value, '1d'), status: { ...status(resource), fallback: true } };
   }
+  const quote = priceData(resource.value);
+  if (normalizeSymbol(quote.symbol) !== symbol) throw new Error('Provider returned a different symbol');
+  if (quote.regularMarketPrice == null) throw new Error('No price available for this symbol');
+  await rememberQuote(symbol, quote, status(resource)).catch(() => {});
+  return { quote, chart: series(resource.value, '5m'), status: status(resource) };
+}
+async function tech(symbol) {
+  const history = await daily(symbol);
+  // Reuse the fast request if it is already in progress; don't let its failure discard history.
+  let live, intradayResult;
+  try { intradayResult = (await intra(symbol)).value; live = priceData(intradayResult); } catch { live = priceData(history.value); }
+  return { quote: technicals(history.value, live, intradayResult), sessionDate: live.sessionDate, status: status(history) };
+}
+async function fundamentals(symbol) {
+  // The direct summary API requires authentication. The public statistics page
+  // carries the same structured data and works with credential-free requests.
+  return cache.get(`fundamentals:yahoo-page:v2:${symbol}`, 6 * 3600000, async () =>
+    yahooSnapshot(await fetchResource(`https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/key-statistics/`, 'text'), symbol));
+}
+async function details(symbol) {
+  const summaryTask = fundamentals(symbol);
+  const newsTask = cache.get(`news:${symbol}`, 10 * 60000, () => fetchJSON(`https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=5&newsCount=12`));
+  const spyTask = chartResource('SPY', '1d', '5d', 60000);
+  const [summary, news, spy] = await Promise.allSettled([summaryTask, newsTask, spyTask]);
+  const quote = summary.status === 'fulfilled' ? { ...summary.value.value.quote } : {};
+  const search = news.status === 'fulfilled' ? news.value.value : {};
+  const match = search.quotes?.find(q => q.symbol === symbol);
+  if (match) {
+    quote.longName ||= match.longname || match.shortname;
+    quote.sector ||= match.sector || match.sectorDisp;
+    quote.industry ||= match.industry || match.industryDisp;
+  }
+  // Omit undefined values so a missing optional name never replaces the core name.
+  for (const key of Object.keys(quote)) if (quote[key] === undefined) delete quote[key];
+  const etf = sectorETF(quote.sector, quote.industry);
+  let sector;
+  try { if (etf) sector = await chartResource(etf, '1d', '5d', 60000); } catch { /* Optional benchmark. */ }
+  const issues = [];
+  if (summary.status === 'rejected') issues.push('Fundamentals providers unavailable for this symbol');
+  if (news.status === 'rejected') issues.push('News unavailable');
+  if (spy.status === 'rejected') issues.push('SPY benchmark unavailable');
+  if (etf && !sector) issues.push('Sector benchmark unavailable');
+  return {
+    quote: { ...quote, sectorEtf: etf, categorySentiment: sentiment(search.news, symbol) },
+    benchmarks: { spy: spy.status === 'fulfilled' ? benchmark(spy.value.value) : null, sector: sector ? benchmark(sector.value) : null },
+    sources: {
+      profile: summary.status === 'fulfilled' ? { ...status(summary.value), provider: summary.value.value.provider, url: summary.value.value.url } : null,
+      news: news.status === 'fulfilled' ? status(news.value) : null,
+      spy: spy.status === 'fulfilled' ? status(spy.value) : null,
+      sector: sector ? status(sector) : null
+    }, issues
+  };
+}
+
+// Serialize read/modify/write operations across tabs and popup instances.
+let edits = Promise.resolve();
+function editStorage(work) {
+  const task = edits.catch(() => {}).then(work);
+  edits = task;
+  return task;
+}
+async function rememberQuote(symbol, quote, source) {
+  if (!Number.isFinite(quote.regularMarketPrice)) return;
+  await editStorage(async () => {
+    const { quoteSnapshots = {} } = await chrome.storage.local.get('quoteSnapshots');
+    const next = { ...quoteSnapshots };
+    delete next[symbol];
+    next[symbol] = { symbol, name: quote.longName || symbol, price: quote.regularMarketPrice,
+      changePercent: quote.regularMarketChangePercent, currency: quote.currency || '', quoteTime: quote.quoteTime,
+      fetchedAt: source.fetchedAt, stale: source.stale };
+    const keys = Object.keys(next);
+    for (const key of keys.slice(0, Math.max(0, keys.length - 100))) delete next[key];
+    await chrome.storage.local.set({ quoteSnapshots: next });
+  });
+}
+async function library() {
+  const lists = await editStorage(async () => {
+    const saved = await chrome.storage.local.get(['watchlist', 'recent', 'quoteSnapshots']);
+    const watchlist = TickerView.cleanSymbols(saved.watchlist), recent = TickerView.cleanSymbols(saved.recent, 12);
+    const patch = {};
+    if (JSON.stringify(saved.watchlist || []) !== JSON.stringify(watchlist)) patch.watchlist = watchlist;
+    if (JSON.stringify(saved.recent || []) !== JSON.stringify(recent)) patch.recent = recent;
+    if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+    return { watchlist, recent, snapshots: saved.quoteSnapshots || {} };
+  });
+  // Reuse legacy chart caches on upgrade. Opening the popup never fetches prices.
+  await cache.ready;
+  const wanted = new Set([...lists.watchlist, ...lists.recent]);
+  for (const [key, entry] of cache.entries) {
+    if (!key.endsWith(':5m:1d')) continue;
+    const quote = priceData(entry.value);
+    if (!wanted.has(quote.symbol) || !Number.isFinite(quote.regularMarketPrice)) continue;
+    if (lists.snapshots[quote.symbol]?.fetchedAt >= entry.time) continue;
+    lists.snapshots[quote.symbol] = { symbol: quote.symbol, name: quote.longName, price: quote.regularMarketPrice,
+      changePercent: quote.regularMarketChangePercent, currency: quote.currency, quoteTime: quote.quoteTime, fetchedAt: entry.time };
+  }
+  return lists;
+}
+async function handle(request) {
+  switch (request.action) {
+    case 'library': return library();
+    case 'clearRecent': return editStorage(async () => { await chrome.storage.local.set({ recent: [] }); return {}; });
+    case 'addWatch': {
+      const ticker = normalizeSymbol(request.ticker);
+      const result = await base(ticker);
+      await handle({ action: 'watch', ticker, saved: true });
+      return { quote: result.quote };
+    }
+    case 'base': return base(normalizeSymbol(request.ticker));
+    case 'technicals': return tech(normalizeSymbol(request.ticker));
+    case 'details': return details(normalizeSymbol(request.ticker));
+    case 'chart': {
+      const symbol = normalizeSymbol(request.ticker);
+      const pair = CHARTS[request.range];
+      if (!pair) throw new Error('Unsupported timeframe');
+      const item = await chartResource(symbol, ...pair, request.range === '1D' || request.range === '5D' ? 60000 : 6 * 3600000);
+      return { chart: series(item.value, pair[0]), status: status(item) };
+    }
+    case 'settings': return editStorage(async () => {
+      const { settings = TickerView.defaults } = await chrome.storage.local.get('settings');
+      const next = TickerView.settings(settings);
+      // Only permit known settings; per-site state is derived inside the worker.
+      for (const key of ['enabled', 'hoverDelay', 'compact', 'reducedEffects', 'indicators']) if (Object.hasOwn(request.patch || {}, key)) next[key] = request.patch[key];
+      if (typeof request.site === 'string' && /^[a-z0-9.-]+$/.test(request.site) && typeof request.siteEnabled === 'boolean') {
+        next.disabledSites = next.disabledSites.filter(site => site !== request.site);
+        if (!request.siteEnabled) next.disabledSites.push(request.site);
+      }
+      await chrome.storage.local.set({ settings: TickerView.settings(next) });
+      return {};
+    });
+    case 'watch': return editStorage(async () => {
+      const symbol = normalizeSymbol(request.ticker);
+      const stored = await chrome.storage.local.get('watchlist');
+      const watchlist = TickerView.cleanSymbols(stored.watchlist);
+      const saved = watchlist.includes(symbol);
+      const wanted = typeof request.saved === 'boolean' ? request.saved : !saved;
+      if (wanted && !saved && watchlist.length >= 100) throw new Error('Watchlist limit is 100 symbols');
+      const next = wanted ? saved ? watchlist : [symbol, ...watchlist] : watchlist.filter(x => x !== symbol);
+      await chrome.storage.local.set({ watchlist: next });
+      return { watchlist: next };
+    });
+    case 'recent': return editStorage(async () => {
+      const symbol = normalizeSymbol(request.ticker);
+      const stored = await chrome.storage.local.get('recent');
+      const recent = TickerView.cleanSymbols(stored.recent, 12);
+      await chrome.storage.local.set({ recent: [symbol, ...recent.filter(x => x !== symbol)].slice(0, 12) });
+      return {};
+    });
+    default: throw new Error('Unknown request');
+  }
+}
+chrome.runtime.onMessage.addListener((request, sender, respond) => {
+  if (sender.id !== chrome.runtime.id || !request || typeof request.action !== 'string') return false;
+  handle(request).then(data => respond({ success: true, ...data }), error => respond({ success: false, error: error.message || 'Unable to load data' }));
+  return true;
 });

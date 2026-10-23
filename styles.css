@@ -1,421 +1,100 @@
-/* TickerView Modern "Obsidian Glass" Theme */
-
-/* Highlight Hover Effect */
 .tickerview-highlight {
-  position: relative;
-  color: #ff8000;
-  /* Golden Glow */
-  font-weight: 700;
-  cursor: help;
-  transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
-  border-bottom: 2px solid rgba(255, 128, 0, 0.3);
-  padding: 0 2px;
-  border-radius: 4px;
+  color: #FF6600; font-weight: 600; cursor: help; border-bottom: 1px dotted currentColor;
+  border-radius: 2px; transition: color .15s, background-color .15s;
 }
-
-.tickerview-highlight:hover {
-  background: rgba(255, 128, 0, 0.15);
-  border-bottom-color: #ff8000;
-  color: #fff;
-  text-shadow: 0 0 12px rgba(255, 128, 0, 0.6);
+.tickerview-highlight:hover, .tickerview-highlight:focus-visible { color: #ff8533; background: rgba(255,102,0,.12); outline: 2px solid #FF6600; outline-offset: 2px; }
+/* Native X/TweetDeck links color .hash and .link-complex-target separately.
+   Keep overrides scoped to links explicitly recognized by TickerView. */
+html body a.tickerview-highlight[data-tv-link] {
+  color: #FF6600 !important;
+  border-bottom: 1px dotted #FF6600 !important;
+  text-decoration: none !important;
+  cursor: help !important;
 }
-
-/* Modal Container */
+html body a.tickerview-highlight[data-tv-link] :is(.hash, .link-complex-target, span, b, strong, i) {
+  color: inherit !important;
+  text-decoration-color: currentColor !important;
+}
+html body a.tickerview-highlight[data-tv-link]:is(:hover, :focus-visible) {
+  color: #ff8533 !important;
+  border-bottom-color: #ff8533 !important;
+}
 #tickerview-modal {
-  position: absolute;
-  z-index: 2147483647;
-  width: 320px;
-  /* Glassmorphism Background */
-  background: rgba(10, 15, 26, 0.98);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-
-  /* Modern Borders & Shadow */
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 16px;
-  box-shadow:
-    0 20px 40px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.02),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-
-  padding: 20px;
-  font-family: 'SF Mono', 'JetBrains Mono', 'Roboto Mono', ui-monospace, 'Cascadia Code', 'Ubuntu Mono', monospace;
-  font-variant-numeric: tabular-nums;
-  -webkit-font-smoothing: antialiased;
-  animation: tv-scale-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-  pointer-events: auto;
-  box-sizing: border-box;
+  all: initial; display: block; position: fixed; z-index: 2147483647; width: 400px;
+  max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto;
+  box-sizing: border-box; padding: 0 16px 14px; background: var(--tv-bg); color: var(--tv-text);
+  border: 1px solid var(--tv-border); border-top: 2px solid var(--tv-accent); border-radius: 4px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.35);
+  font: 12px/1.5 var(--tv-sans); font-variant-numeric: tabular-nums;
+  text-align: left; color-scheme: dark; scrollbar-width: thin; scrollbar-color: var(--tv-border-strong) var(--tv-panel);
 }
-
-@keyframes tv-scale-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.96);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+#tickerview-modal[hidden] { display: none; }
+#tickerview-modal *, #tickerview-modal *::before, #tickerview-modal *::after { box-sizing: border-box; }
+#tickerview-modal button {
+  appearance: none; font: 10px/1.5 var(--tv-mono); color: var(--tv-text); background: var(--tv-control); border: 1px solid var(--tv-border);
+  padding: 4px 8px; border-radius: 2px; cursor: pointer; transition: color .15s, background-color .15s, border-color .15s;
 }
-
-/* Header Section */
-.tv-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+#tickerview-modal button:hover { border-color: var(--tv-border-strong); color: var(--tv-bright); }
+#tickerview-modal button:disabled { opacity: .5; cursor: wait; }
+#tickerview-modal button[aria-pressed="true"] { border-color: var(--tv-accent); color: var(--tv-accent); background: var(--tv-accent-soft); }
+#tickerview-modal :focus-visible { outline: 2px solid var(--tv-accent); outline-offset: 2px; }
+#tickerview-modal a { color: var(--tv-text); text-decoration: none; }
+#tickerview-modal a:hover { color: var(--tv-accent); text-decoration: underline; }
+#tickerview-modal p { margin: 8px 0; }
+#tickerview-modal .tv-chrome { position: sticky; top: 0; z-index: 2; background: var(--tv-bg); padding-top: 10px; }
+#tickerview-modal .tv-brand { display: flex; align-items: center; gap: 9px; padding-bottom: 10px; }
+#tickerview-modal .tv-brand img { width: 32px; height: 32px; object-fit: contain; border-radius: 2px; }
+#tickerview-modal .tv-brand-copy { display: flex; flex-direction: column; gap: 1px; }
+#tickerview-modal .tv-brand-name { color: var(--tv-bright); font: 700 10px/1.5 var(--tv-sans); letter-spacing: .14em; }
+#tickerview-modal .tv-brand-product { color: var(--tv-dim); font: 9px/1.4 var(--tv-mono); }
+#tickerview-modal .tv-brand-tag { margin-left: auto; color: var(--tv-accent); font: 9px/1.5 var(--tv-mono); letter-spacing: .08em; border: 1px solid var(--tv-border); padding: 2px 5px; }
+#tickerview-modal .tv-toolbar { display: flex; gap: 6px; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--tv-border); }
+#tickerview-modal .tv-toolbar [data-action="close"] { margin-left: auto; min-width: 26px; }
+#tickerview-modal .tv-summary { display: flex; flex-direction: column; gap: 10px; }
+#tickerview-modal .tv-symbol { font: 700 21px/1.5 var(--tv-mono); color: var(--tv-bright); }
+#tickerview-modal .tv-fullname { font: 500 12px/1.6 var(--tv-sans); color: var(--tv-text); }
+#tickerview-modal .tv-company-context { margin-top: 2px; font-size: 10px; color: var(--tv-dim); }
+#tickerview-modal .tv-price { font: 600 24px/1.4 var(--tv-mono); letter-spacing: -.04em; color: var(--tv-bright); }
+#tickerview-modal .tv-price-section { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+#tickerview-modal .tv-price-section > div { font: 11px/1.5 var(--tv-mono); }
+#tickerview-modal .tv-positive { color: var(--tv-up); }
+#tickerview-modal .tv-negative { color: #ff6b63; }
+#tickerview-modal .tv-freshness, #tickerview-modal .tv-chart-readout, #tickerview-modal .tv-source-dates { color: var(--tv-dim); font: 9px/1.7 var(--tv-mono); overflow-wrap: anywhere; margin: 8px 0; }
+#tickerview-modal .tv-timeframes { display: flex; gap: 4px; margin-top: 12px; }
+#tickerview-modal .tv-timeframes button { flex: 1; }
+#tickerview-modal .tv-chart {
+  height: 110px; margin-top: 8px; background-color: var(--tv-panel); border: 1px solid var(--tv-border); border-radius: 2px; overflow: hidden;
+  background-image: linear-gradient(rgba(192,198,207,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(192,198,207,.04) 1px, transparent 1px); background-size: 24px 24px;
 }
+#tickerview-modal .tv-chart svg { width: 100%; height: 100%; display: block; }
+#tickerview-modal .tv-chart-line { stroke: var(--tv-accent); }
+#tickerview-modal .tv-volume-bar { fill: var(--tv-muted); opacity: .22; }
+#tickerview-modal .tv-crosshair { stroke: var(--tv-accent); }
+#tickerview-modal .tv-chart-readout { min-height: 30px; }
+#tickerview-modal .tv-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; padding: 1px; background: var(--tv-border); border: 1px solid var(--tv-border); border-radius: 2px; margin: 12px 0; }
+#tickerview-modal .tv-stat-item { display: flex; flex-direction: column; justify-content: space-between; gap: 4px; min-width: 0; padding: 8px; background: var(--tv-panel); }
+#tickerview-modal .tv-stat-label { color: var(--tv-muted); font: 500 9px/1.5 var(--tv-sans); }
+#tickerview-modal .tv-stat-value { color: var(--tv-bright); font: 11px/1.5 var(--tv-mono); overflow-wrap: anywhere; }
+#tickerview-modal .tv-extras { font-size: 11px; }
+#tickerview-modal .tv-targets { padding: 8px 0; color: var(--tv-muted); }
+#tickerview-modal .tv-target-track { height: 3px; background: linear-gradient(90deg,var(--tv-down),var(--tv-accent),var(--tv-up)); position: relative; margin: 12px 4px; }
+#tickerview-modal .tv-target-track span { position: absolute; top: -3px; width: 4px; height: 9px; background: var(--tv-bright); border: 1px solid var(--tv-bg); }
+#tickerview-modal details { border-top: 1px solid var(--tv-border); padding: 10px 0; }
+#tickerview-modal summary { cursor: pointer; color: var(--tv-text); font: 600 10px/1.6 var(--tv-sans); }
+#tickerview-modal summary:hover, #tickerview-modal details[open] > summary { color: #ff8533; }
+#tickerview-modal .tv-guide p { color: var(--tv-muted); font-size: 11px; }
+#tickerview-modal article { margin-top: 10px; }
+#tickerview-modal article div { color: var(--tv-dim); font: 9px/1.7 var(--tv-mono); }
+#tickerview-modal .tv-messages { font: 10px/1.6 var(--tv-mono); color: var(--tv-warn); overflow-wrap: anywhere; }
+#tickerview-modal .tv-research-dock { display: flex; justify-content: space-between; gap: 8px; padding-top: 12px; margin-top: 8px; border-top: 1px solid var(--tv-border); font: 9px/1.6 var(--tv-mono); text-transform: uppercase; letter-spacing: .06em; }
+#tickerview-modal.tv-compact .tv-stats-grid { grid-template-columns: 1fr 1fr; }
+#tickerview-modal.tv-compact .tv-stat-item { flex-direction: row; align-items: center; gap: 5px; padding: 5px 8px; }
+#tickerview-modal.tv-compact .tv-source-dates { display: none; }
+#tickerview-modal.tv-compact { width: 420px; }
+#tickerview-modal.tv-reduced { box-shadow: none; }
+#tickerview-modal.tv-reduced * { transition: none; animation: none; }
+#tickerview-modal .tv-earnings-soon { color: #ff8533; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .tickerview-highlight, #tickerview-modal * { transition: none; animation: none; } }
+@media (max-width: 400px) { #tickerview-modal .tv-stats-grid { grid-template-columns: 1fr 1fr; } }
 
-.tv-title-section {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.tv-symbol {
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  color: #fff;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-
-.tv-symbol:hover {
-  color: #ff8000;
-}
-
-.tv-fullname {
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-  max-width: 160px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Tag (Sector/Ind) */
-.tv-tag {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: 500;
-}
-
-.tv-price-section {
-  text-align: right;
-}
-
-.tv-price {
-  font-size: 22px;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: -0.5px;
-  line-height: 1.1;
-}
-
-.tv-change {
-  display: block;
-  font-size: 11px;
-  font-weight: 600;
-  margin-top: 4px;
-}
-
-/* Chart Area */
-.tv-chart-container {
-  width: 100%;
-  height: 60px;
-  margin-bottom: 20px;
-  /* Subtle inset effect */
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
-  position: relative;
-  overflow: hidden;
-  padding: 0;
-  /* Let SVG fill */
-}
-
-/* Grid Layout */
-.tv-stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: 24px;
-  row-gap: 10px;
-}
-
-.tv-stat-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-}
-
-.tv-stat-label {
-  color: rgba(255, 255, 255, 0.45);
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.tv-stat-value {
-  color: rgba(255, 255, 255, 0.95);
-  font-weight: 600;
-}
-
-/* Pulse for Status */
-.tv-pulse {
-  animation: tv-pulse-anim 2s infinite;
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-@keyframes tv-pulse-anim {
-  0% {
-    box-shadow: 0 0 0 0 rgba(0, 255, 163, 0.1);
-    background: rgba(0, 255, 163, 0.05);
-  }
-
-  70% {
-    box-shadow: 0 0 0 6px rgba(0, 255, 163, 0);
-    background: rgba(0, 255, 163, 0.15);
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 rgba(0, 255, 163, 0);
-    background: rgba(0, 255, 163, 0.05);
-  }
-}
-
-/* Footer */
-.tv-footer {
-  margin-top: 20px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.25);
-  text-align: center;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-/* Info Icon & Legend */
-.tv-info-icon {
-  position: absolute;
-  bottom: 12px;
-  right: 20px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.4);
-  cursor: pointer;
-  transition: all 0.2s;
-  z-index: 1001;
-}
-
-.tv-info-icon:hover {
-  border-color: #ff8000;
-  color: #ff8000;
-  background: rgba(255, 128, 0, 0.1);
-}
-
-.tv-legend {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(10, 15, 26, 0.98);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
-  padding: 20px;
-  box-sizing: border-box;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s;
-  overflow-y: auto;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-#tickerview-modal:hover .tv-info-icon:hover+.tv-legend,
-.tv-legend:hover {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.tv-legend-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #ff8000;
-  margin-bottom: 4px;
-}
-
-.tv-legend-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.tv-legend-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: #fff;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.tv-legend-desc {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-  line-height: 1.4;
-}
-
-/* Utilities */
-.tv-loader {
-  padding: 30px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 12px;
-}
-
-.tv-spinner {
-  width: 20px;
-  height: 20px;
-  margin: 0 auto 10px;
-  border: 2px solid rgba(255, 255, 255, 0.05);
-  border-top-color: #ff8000;
-  border-radius: 50%;
-  animation: tv-spin 0.8s linear infinite;
-}
-
-@keyframes tv-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.tv-sentiment-pill {
-  font-size: 8px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  background: rgba(255, 255, 255, 0.02);
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-/* Price Target Bar */
-.tv-target-container {
-  margin: 16px 0;
-  padding: 8px 0;
-}
-
-.tv-target-label-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 8px;
-  color: rgba(255, 255, 255, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 6px;
-}
-
-.tv-target-bar-track {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 2px;
-  position: relative;
-  margin: 10px 0;
-}
-
-.tv-target-marker {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #fff;
-  border: 1px solid #000;
-}
-
-.tv-target-marker.low {
-  background: #ff4d4d;
-}
-
-.tv-target-marker.mean {
-  background: #ff8000;
-}
-
-.tv-target-marker.high {
-  background: #00ffa3;
-}
-
-.tv-target-current {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 2px;
-  height: 12px;
-  background: #fff;
-  box-shadow: 0 0 8px #fff;
-  z-index: 2;
-}
-
-.tv-target-val {
-  position: absolute;
-  top: 14px;
-  transform: translateX(-50%);
-  font-size: 8px;
-  color: rgba(255, 255, 255, 0.6);
-  white-space: nowrap;
-}
-
-/* Research Dock */
-.tv-research-dock {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.tv-research-link {
-  font-size: 10px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
-  text-decoration: none;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  transition: all 0.2s;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.tv-research-link:hover {
-  color: #ff8000;
-  background: rgba(255, 128, 0, 0.1);
-  transform: translateY(-1px);
-}
+#tickerview-modal .tv-missing { color: var(--tv-dim); font: 9px/1.7 var(--tv-mono); }
