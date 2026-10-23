@@ -122,6 +122,7 @@ export function profileData(s = {}) {
   const price = s.price || {}, profile = s.summaryProfile || s.assetProfile || {}, f = s.financialData || {}, k = s.defaultKeyStatistics || {};
   const earnings = s.calendarEvents?.earnings?.earningsDate?.[0];
   return {
+    instrumentType: price.quoteType || null,
     longName: price.longName || price.shortName, sector: profile.sector, industry: profile.industry,
     marketCap: raw(s.summaryDetail?.marketCap) ?? raw(price.marketCap),
     fundamentals: {

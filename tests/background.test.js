@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const metaHTML = await readFile(new URL('./fixtures/yahoo-meta.html', import.meta.url), 'utf8');
-let listener, values = {}, requests = [];
+let listener, launch, values = {}, requests = [], createdWindows = [], updatedWindows = [], updatedTabs = [];
 globalThis.chrome = {
-  runtime: { id: 'test-extension', onMessage: { addListener: fn => { listener = fn; } } },
+  action: { onClicked: { addListener: fn => { launch = fn; } } },
+  windows: { create: async options => { createdWindows.push(options); return { id: 55 }; }, get: async () => ({ tabs: [{ id: 77 }] }), update: async (id, options) => { updatedWindows.push({ id, ...options }); } },
+  tabs: { update: async (id, options) => { updatedTabs.push({ id, ...options }); } },
+  runtime: { getURL: path => `chrome-extension://test-extension/${path}`, id: 'test-extension', onMessage: { addListener: fn => { listener = fn; } } },
   storage: { local: { get: async () => structuredClone(values), set: async v => { Object.assign(values, structuredClone(v)); } } }
 };
 const times = ['2026-10-21T13:30Z', '2026-10-22T13:30Z', '2026-10-23T13:30Z'].map(x => Date.parse(x) / 1000);
@@ -80,4 +83,32 @@ test('manual addition validates data before saving, rejects amounts, and explici
   await send({ action: 'watch', ticker: 'META', saved: false }); assert.equal(values.watchlist.includes('META'), false);
   const saved = [...values.watchlist]; await send({ action: 'clearRecent' });
   assert.deepEqual(values.recent, []); assert.deepEqual(values.watchlist, saved);
+});
+
+test('valuation assumptions are normalized, validated, serialized and bounded per stock', async () => {
+  const assumptions = { bear: 10, base: 20, bull: 30 };
+  await Promise.all(['BRK.B', 'MSFT'].map(ticker => send({ action: 'saveValuation', ticker, assumptions })));
+  assert.deepEqual(values.valuationScenarios['BRK-B'], assumptions);
+  assert.deepEqual(values.valuationScenarios.MSFT, assumptions);
+  assert.equal((await send({ action: 'saveValuation', ticker: 'MSFT', assumptions: { bear: 40, base: 20, bull: 30 } })).success, false);
+  assert.deepEqual(values.valuationScenarios.MSFT, assumptions);
+  await send({ action: 'resetValuation', ticker: 'BRK.B' });
+  assert.equal(Object.hasOwn(values.valuationScenarios, 'BRK-B'), false);
+  for (let i = 0; i < 101; i++) await send({ action: 'saveValuation', ticker: `VAL${i}`, assumptions });
+  assert.equal(Object.keys(values.valuationScenarios).length, 100);
+  assert.equal(Object.hasOwn(values.valuationScenarios, 'VAL0'), false);
+});
+
+test('toolbar directly opens and reuses a full-height launcher with the source site', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.action.default_popup, undefined);
+  await launch({ url: 'https://x.com/i/tweetdeck' });
+  assert.equal(createdWindows.length, 1);
+  assert.equal(createdWindows[0].type, 'popup');
+  assert.equal(new URL(createdWindows[0].url).searchParams.get('expanded'), '1');
+  assert.equal(new URL(createdWindows[0].url).searchParams.get('site'), 'x.com');
+  await launch({ url: 'chrome://extensions/' });
+  assert.equal(createdWindows.length, 1);
+  assert.equal(new URL(updatedTabs.at(-1).url).searchParams.has('site'), false);
+  assert.deepEqual(updatedWindows.at(-1), { id: 55, focused: true });
 });

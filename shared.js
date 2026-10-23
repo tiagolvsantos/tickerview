@@ -36,5 +36,35 @@ globalThis.TickerView = (() => {
       indicators: Array.isArray(value.indicators) ? value.indicators.filter(x => Object.hasOwn(indicators, x)) : [...defaults.indicators]
     };
   }
-  return { indicators, groups, presets, normalizeSymbol, cleanSymbols, defaults, settings: value => settings({ ...defaults, ...value }) };
+  const valuationDefaults = Object.freeze({ bear: 15, base: 20, bull: 25 });
+  function valuationAssumptions(value) {
+    const result = {};
+    for (const key of ['bear', 'base', 'bull']) {
+      const n = value?.[key];
+      if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0 || n > 200) throw new Error('Each P/E must be greater than 0 and at most 200.');
+      result[key] = n;
+    }
+    if (result.bear > result.base || result.base > result.bull) throw new Error('Use bear ≤ base ≤ bull P/E values.');
+    return result;
+  }
+  function valuation(quote, assumptions = valuationDefaults) {
+    const pe = valuationAssumptions(assumptions), f = quote.fundamentals || {};
+    const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0;
+    const currencyMatches = typeof quote.currency === 'string' && !!quote.currency && f.quoteCurrency === quote.currency;
+    const comparable = currencyMatches && positive(quote.regularMarketPrice);
+    const difference = value => comparable ? (value / quote.regularMarketPrice - 1) * 100 : null;
+    let reason = null;
+    if (quote.instrumentType !== 'EQUITY') reason = 'Earnings estimates are available only for stocks with verified instrument data.';
+    else if (!positive(f.trailingEps)) reason = 'A positive trailing 12-month EPS is required for the earnings model.';
+    else if (!currencyMatches) reason = 'The EPS and quote currencies could not be matched.';
+    else if (!positive(quote.regularMarketPrice)) reason = 'A current positive quote is required for comparison.';
+    const scenarios = reason ? [] : ['bear', 'base', 'bull'].map(key => {
+      const value = f.trailingEps * pe[key];
+      return { key, multiple: pe[key], value, difference: difference(value) };
+    });
+    const targets = currencyMatches ? [['Low', quote.targetLow], ['Mean', quote.targetMean], ['High', quote.targetHigh]]
+      .filter(([, value]) => positive(value)).map(([label, value]) => ({ label, value, difference: difference(value) })) : [];
+    return { reason, scenarios, targets };
+  }
+  return { valuationDefaults, valuationAssumptions, valuation, indicators, groups, presets, normalizeSymbol, cleanSymbols, defaults, settings: value => settings({ ...defaults, ...value }) };
 })();

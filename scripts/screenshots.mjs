@@ -53,8 +53,8 @@ await context.addInitScript(() => {
           }
         };
         if (request.action === 'details') return {
-          success: true, quote: { sector: 'Technology', industry: 'Semiconductors', marketCap: 4530000000000, sectorEtf: 'SMH', shortFloatPct: 1.2, shortRatio: 1.4,
-            ...(['fundamentals', 'news'].some(type => location.pathname.endsWith(type)) ? { earningsTimestamp: Date.parse('2026-11-18T21:00:00Z') / 1000,
+          success: true, quote: { instrumentType: 'EQUITY', sector: 'Technology', industry: 'Semiconductors', marketCap: 4530000000000, sectorEtf: 'SMH', shortFloatPct: 1.2, shortRatio: 1.4,
+            ...(['fundamentals', 'news', 'valuation'].some(type => location.pathname.endsWith(type)) ? { earningsTimestamp: Date.parse('2026-11-18T21:00:00Z') / 1000,
             targetLow: 160, targetMean: 215, targetHigh: 260, analystCount: 42, recKey: 'buy' } : {}),
             fundamentals: { trailingPE: 42.8, forwardPE: 31.2, priceToSales: 23.4, priceToBook: 28.6, enterpriseToEbitda: 35.1, trailingEps: 4.36, revenue: 193600000000, revenueGrowth: .384, earningsGrowth: .42, profitMargin: .526, operatingMargin: .612, returnOnEquity: .948, freeCashFlow: 86200000000, totalCash: 60800000000, totalDebt: 8500000000, currency: 'USD', quoteCurrency: 'USD', fiscalYearEnd: Date.parse('2026-01-25T00:00:00Z') / 1000 }, categorySentiment: sentiment },
           benchmarks: { spy: { change: .8, date: '2026-10-23' }, sector: { change: 1.1, date: '2026-10-23' } },
@@ -99,12 +99,14 @@ function stage(type) {
   const copy = {
     card: ['THE HOVER CARD', 'Market context.<br><em>One hover away.</em>', 'Quotes, charts, and technicals.<br>Right where you read.'],
     settings: ['YOUR SYMBOLS', 'Follow the names.<br><em>Keep the context.</em>', 'A local watchlist with cached prices.<br>Open any saved or recent symbol in one click.'],
+    valuation: ['VALUE ESTIMATES', 'Explore value.<br><em>See the assumptions.</em>', 'Editable earnings scenarios and analyst targets.<br>Compare estimates with the current quote.'],
     fundamentals: ['COMPANY FUNDAMENTALS', 'Look beyond<br><em>the price.</em>', 'Valuation, profitability, and financial strength.<br>Company figures with clear reporting currencies.'],
     controls: ['MAKE IT YOURS', 'Less noise.<br><em>Your indicators.</em>', 'Choose a preset or select each metric.<br>Adjust the experience for the way you read.'],
     news: ['NEWS & RESEARCH', 'Read the story.<br><em>See the signals.</em>', 'Headline sentiment, earnings, analyst targets,<br>and direct links for deeper research.'],
     tweetdeck: ['X PRO / TWEETDECK', 'In your feed.<br><em>Across columns.</em>', 'Orange cashtags in X Pro and OldTweetDeck.<br>Keep the stock card pinned while you read.']
   }[type];
   const featureSets = {
+    valuation: [['Earnings scenarios', 'EPS × assumed P/E.<br>Bear, base, and bull.'], ['Your assumptions', 'Edit and save multiples.<br>Reset to examples.'], ['Separate opinions', 'Analyst targets with<br>quote comparisons.']],
     fundamentals: [['Valuation', 'P/E, EPS, price / book,<br>and EV / EBITDA.'], ['Business performance', 'Revenue, growth,<br>margins, and ROE.'], ['Financial strength', 'Free cash flow,<br>cash, and debt.']],
     news: [['Explainable sentiment', 'Keyword evidence,<br>age, and decay.'], ['Upcoming catalysts', 'Earnings estimates<br>and analyst targets.'], ['Research shortcuts', 'TradingView, Finviz,<br>and insider activity.']],
     tweetdeck: [['Dynamic feeds', 'Split-span links<br>and recycled rows.'], ['Currency aware', 'Cash figures stay text.<br>Cashtags open a card.'], ['Keyboard friendly', 'Enter / Space to open.<br>Escape to dismiss.']],
@@ -125,7 +127,7 @@ function stage(type) {
 }
 await context.route('https://x.com/**', async route => {
   const path = new URL(route.request().url()).pathname;
-  if (/^\/showcase-(card|settings|fundamentals|controls|news|tweetdeck)$/.test(path)) {
+  if (/^\/showcase-(card|settings|fundamentals|controls|news|tweetdeck|valuation)$/.test(path)) {
     await route.fulfill({ contentType: 'text/html', body: stage(path.replace('/showcase-', '')) }); return;
   }
   if (!/^\/(?:icons\/[\w.-]+\.png|fonts\/[\w.-]+\.ttf|[\w.-]+\.(?:js|css|html))$/.test(path)) { await route.abort(); return; }
@@ -135,7 +137,7 @@ await context.route('https://x.com/**', async route => {
 try {
   const page = await context.newPage();
   const images = [];
-  const types = ['card', 'settings', 'fundamentals', 'controls', 'news', 'tweetdeck'];
+  const types = ['card', 'settings', 'fundamentals', 'controls', 'news', 'tweetdeck', 'valuation'];
   for (const [index, type] of types.entries()) {
     await page.goto(`https://x.com/showcase-${type}`);
     if (['settings', 'controls'].includes(type)) {
@@ -156,10 +158,13 @@ try {
       await page.locator('[data-action="pin"]').click();
       await page.locator('[data-fundamental="revenue"]').waitFor();
       await page.locator('.tv-news summary').filter({ hasText: 'Bullish' }).waitFor();
+      if (type !== 'valuation') await page.locator('.tv-valuation > summary').click();
       if (type !== 'fundamentals') await page.locator('.tv-fundamentals > summary').click();
+      if (type === 'valuation') await page.locator('.tv-assumptions > summary').click();
       if (type === 'news') await page.locator('.tv-news > summary').click();
       await page.locator('#tickerview-modal').evaluate((node, type) => {
-        if (type === 'fundamentals') node.scrollTop = node.querySelector('.tv-fundamentals').offsetTop - 15;
+        if (type === 'valuation') node.scrollTop = node.querySelector('.tv-valuation').offsetTop - node.querySelector('.tv-chrome').offsetHeight - 12;
+        else if (type === 'fundamentals') node.scrollTop = node.querySelector('.tv-fundamentals').offsetTop - 15;
         else if (type === 'news') node.scrollTop = node.scrollHeight;
       }, type);
       await page.mouse.move(740, 720);

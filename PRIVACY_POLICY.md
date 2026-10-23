@@ -17,6 +17,7 @@ As with any direct internet request, the provider can receive connection informa
 TickerView stores the following in Chrome's local extension storage on this browser:
 
 - Settings, including the hostnames of sites where you disabled the extension.
+- P/E valuation assumptions for up to 100 stock symbols. Calculations run locally; assumptions are not sent to a provider.
 - Up to 100 watchlist symbols and the 12 most recently opened symbols.
 - Up to 100 last-viewed quote summaries (company name, price/change, currency, and timestamps) for the popup watchlist. Opening the popup reads these local summaries without sending a watchlist batch to a provider.
 - A bounded market-data cache (up to 80 resources and approximately 2 MB of serialized data).

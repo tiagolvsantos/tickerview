@@ -11,6 +11,46 @@ async function request(action, extra = {}) {
   if (!result?.success) throw new Error(result?.error || 'Extension unavailable');
   return result;
 }
+const popupParams = new URLSearchParams(location.search);
+const expanded = popupParams.get('expanded') === '1';
+if (expanded) {
+  document.body.classList.add('tv-expanded');
+  $('#expand-popup').hidden = true;
+  // A regular extension window can use the available display height, unlike a
+  // toolbar panel. Fit once on opening, then leave manual resizing to the user.
+  void (async () => {
+    try {
+      const current = await chrome.windows.getCurrent();
+      const height = Math.max(300, Math.floor(screen.availHeight - 40));
+      const width = Math.min(480, Math.floor(screen.availWidth));
+      await chrome.windows.update(current.id, { width, height,
+        top: Math.floor(screen.availTop + 20), left: Math.floor(screen.availLeft + Math.max(0, screen.availWidth - width - 20)) });
+    } catch { /* Keep the initial window usable if display sizing is unavailable. */ }
+  })();
+}
+function supportedSite(address) {
+  try {
+    const url = new URL(address);
+    const supported = chrome.runtime.getManifest().content_scripts[0].matches.some(pattern => {
+      const host = new URL(pattern.replace('*.', '')).hostname;
+      return url.hostname === host || url.hostname.endsWith(`.${host}`);
+    });
+    return url.protocol === 'https:' && supported ? url.hostname : null;
+  } catch { return null; }
+}
+$('#expand-popup').addEventListener('click', async () => {
+  const button = $('#expand-popup'); button.disabled = true;
+  try {
+    const url = new URL(chrome.runtime.getURL('popup.html'));
+    url.searchParams.set('expanded', '1');
+    if (currentSite) url.searchParams.set('site', currentSite);
+    const height = Math.max(300, Math.floor(screen.availHeight - 40));
+    const width = Math.min(480, Math.floor(screen.availWidth));
+    await chrome.windows.create({ url: url.href, type: 'popup', width, height,
+      top: Math.floor(screen.availTop + 20), left: Math.floor(screen.availLeft + Math.max(0, screen.availWidth - width - 20)) });
+    window.close();
+  } catch (error) { message(`Could not expand TickerView: ${error.message}`); button.disabled = false; }
+});
 function renderSettings() {
   for (const key of ['enabled', 'compact', 'reducedEffects']) $(`#${key}`).checked = currentSettings[key];
   const delay = $('#hoverDelay');
@@ -135,13 +175,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   try {
     const [values, tabs] = await Promise.all([chrome.storage.local.get('settings'), chrome.tabs.query({ active: true, currentWindow: true }), refreshLibrary()]);
     currentSettings = TickerView.settings(values.settings);
-    try {
-      const url = new URL(tabs[0]?.url);
-      const supported = chrome.runtime.getManifest().content_scripts[0].matches.some(pattern => {
-        const host = new URL(pattern.replace('*.', '')).hostname; return url.hostname === host || url.hostname.endsWith(`.${host}`);
-      });
-      if (url.protocol === 'https:' && supported) currentSite = url.hostname;
-    } catch { /* Browser pages do not expose supported site controls. */ }
+    currentSite = expanded && popupParams.get('site')
+      ? supportedSite(`https://${popupParams.get('site')}/`)
+      : supportedSite(tabs[0]?.url);
     renderSettings(); $('#settings').disabled = false;
     message(currentSite ? `Ready on ${currentSite}` : 'Open a supported site for per-site controls');
   } catch (error) { message(error.message); }

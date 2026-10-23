@@ -12,6 +12,7 @@
     const face = new FontFace(family, `url("${chrome.runtime.getURL(path)}")`, { weight, display: 'swap' });
     document.fonts.add(face);
   }
+  let valuationScenarios = {};
   let settings = defaults, watchlist = [], active = false, pinned = false;
   let hoverTimer, hideTimer, scanJob, refreshTimer, anchor, state, generation = 0, chartGeneration = 0;
   let pending = new Set(), traversal = null;
@@ -208,6 +209,75 @@
     }));
     if (same()) scheduleRefresh();
   }
+  function savedAssumptions(ticker) {
+    try { return TickerView.valuationAssumptions(valuationScenarios[ticker]); }
+    catch { return { ...TickerView.valuationDefaults }; }
+  }
+  function renderValuation(q) {
+    const assumptions = savedAssumptions(state.ticker);
+    const form = modal.querySelector('.tv-valuation-form');
+    if (!state.valuationDirty) for (const key of ['bear', 'base', 'bull']) form.elements[key].value = assumptions[key];
+    const model = TickerView.valuation(q, assumptions);
+    const price = value => `${escape(q.currency || '')} ${number(value)}`;
+    const delta = value => value == null ? 'Comparison unavailable' : `${value > 0 ? '+' : ''}${number(value, '%')} vs quote`;
+    let html = '<p class="tv-valuation-note">EPS × assumed P/E · scenario estimates, not a price forecast.</p>';
+    const saved = Object.hasOwn(valuationScenarios, state.ticker);
+    html += `<p class="tv-valuation-note">${saved ? 'Your saved assumptions' : 'Illustrative examples: 15× / 20× / 25× for every stock; not stock-specific fair multiples.'}</p>`;
+    if (model.scenarios.length) {
+      const values = [...model.scenarios.map(item => item.value), q.regularMarketPrice];
+      const min = Math.min(...values), max = Math.max(...values), span = max - min || Math.max(1, max * .1);
+      const pos = value => 5 + (value - min) / span * 90;
+      html += `<div class="tv-value-track" role="img" aria-label="Earnings scenario range and current quote">${model.scenarios.map(item => `<span style="left:${pos(item.value)}%" title="${item.key}: ${price(item.value)}"></span>`).join('')}<span class="tv-value-current" style="left:${pos(q.regularMarketPrice)}%" title="Current quote: ${price(q.regularMarketPrice)}"></span></div>`;
+      html += `<div class="tv-value-cells">${model.scenarios.map(item => `<div data-scenario="${item.key}"><span>${item.key[0].toUpperCase() + item.key.slice(1)} · ${number(item.multiple)}×</span><strong>${price(item.value)}</strong><small>${delta(item.difference)}</small></div>`).join('')}</div>`;
+      const base = model.scenarios[1].value, gap = (q.regularMarketPrice / base - 1) * 100;
+      html += `<p class="tv-valuation-note">Quote ${price(q.regularMarketPrice)} is ${number(Math.abs(gap), '%')} ${gap >= 0 ? 'above' : 'below'} the base estimate. EPS (TTM): ${price(q.fundamentals.trailingEps)}.</p>`;
+    } else html += `<p class="tv-valuation-note">${state.loading.has('base') || state.loading.has('details') ? 'Loading value estimate…' : escape(model.reason)}</p>`;
+    html += '<div class="tv-analyst-comparison"><strong>Analyst targets · separate provider opinions</strong>';
+    if (model.targets.length) {
+      const ratings = { strong_buy: 'Strong buy', buy: 'Buy', hold: 'Hold', underperform: 'Underperform', sell: 'Sell', strong_sell: 'Strong sell' };
+      const rating = ratings[q.recKey] || (typeof q.recKey === 'string' ? q.recKey.replaceAll('_', ' ') : '');
+      html += `<p class="tv-valuation-note">${Number.isFinite(q.analystCount) ? `${number(q.analystCount, '', 0)} analysts` : 'Analyst count unavailable'}${rating ? ` · ${escape(rating)}` : ''} · snapshot</p>`;
+      if (model.targets.some(item => item.label === 'Low') && model.targets.some(item => item.label === 'High')) {
+        const markers = model.targets.map(item => ({ label: item.label, value: item.value }));
+        if (Number.isFinite(q.regularMarketPrice) && q.regularMarketPrice > 0) markers.push({ label: 'Price', value: q.regularMarketPrice });
+        const min = Math.min(...markers.map(item => item.value)) * .95;
+        const max = Math.max(...markers.map(item => item.value)) * 1.05;
+        const description = markers.map(item => `${item.label}: ${price(item.value)}`).join(' · ');
+        html += `<div class="tv-targets"><div class="tv-target-track" role="img" aria-label="Analyst target range · ${description}">${markers.map(item => `<span style="left:${Math.max(0, Math.min(100, (item.value - min) / (max - min || 1) * 100))}%" title="${item.label}: ${price(item.value)}"></span>`).join('')}</div></div>`;
+      }
+      html += `<div class="tv-value-cells">${model.targets.map(item => `<div data-target="${item.label.toLowerCase()}"><span>${item.label}</span><strong>${price(item.value)}</strong><small>${delta(item.difference)}</small></div>`).join('')}</div>`;
+    } else html += `<p class="tv-valuation-note">${state.loading.has('details') ? 'Loading analyst targets…' : 'Comparable analyst targets are unavailable for this instrument.'}</p>`;
+    html += '</div>';
+    if (state.sources?.profile) html += `<p class="tv-valuation-note">Fundamentals: ${escape(new Date(state.sources.profile.fetchedAt).toLocaleString())}${state.sources.profile.stale ? ' · STALE cache' : ''}</p>`;
+    if (state.statuses.base?.stale || q.quoteTime && Date.now() / 1000 - q.quoteTime > 900) html += '<p class="tv-valuation-note">Quote is cached or more than 15 minutes old; comparisons use the displayed quote.</p>';
+    modal.querySelector('.tv-valuation-output').innerHTML = html;
+  }
+  async function saveValuation(reset = false) {
+    const current = state, form = modal.querySelector('.tv-valuation-form');
+    if (!current || current.valuationSaving) return;
+    const feedback = form.querySelector('.tv-valuation-feedback');
+    try {
+      const assumptions = reset ? null : TickerView.valuationAssumptions(Object.fromEntries(['bear', 'base', 'bull'].map(key => [key, Number(form.elements[key].value)])));
+      current.valuationSaving = true;
+      for (const button of form.querySelectorAll('button')) button.disabled = true;
+      const result = await request(reset ? 'resetValuation' : 'saveValuation', { ticker: current.ticker, assumptions });
+      valuationScenarios = result.valuationScenarios;
+      if (state !== current || modal.hidden) return;
+      current.valuationDirty = false; renderValuation(current.quote);
+      feedback.textContent = reset ? 'Reset to illustrative examples.' : 'Assumptions saved on this browser.';
+    } catch (error) { if (state === current) feedback.textContent = error.message; }
+    finally { current.valuationSaving = false; for (const button of form.querySelectorAll('button')) button.disabled = false; }
+  }
+  modal.addEventListener('input', event => {
+    if (state && event.target.closest('.tv-valuation-form')) {
+      state.valuationDirty = true;
+      modal.querySelector('.tv-valuation-feedback').textContent = 'Unsaved changes. Apply to update the estimates.';
+    }
+  });
+  modal.addEventListener('submit', event => {
+    if (!event.target.matches('.tv-valuation-form')) return;
+    event.preventDefault(); void saveValuation();
+  });
   function shell() {
     modal.innerHTML = `
       <div class="tv-chrome">
@@ -216,7 +286,12 @@
       <div class="tv-summary" aria-live="polite"></div><div class="tv-freshness"></div>
       <div class="tv-timeframes" role="group" aria-label="Chart timeframe">${['1D', '5D', '1M', '6M', '1Y'].map(range => `<button type="button" data-range="${range}" aria-pressed="${range === '1D'}">${range}</button>`).join('')}</div>
       <div class="tv-chart" tabindex="0" role="group" aria-label="Price chart. Use left and right arrow keys to inspect points."></div><div class="tv-chart-readout" aria-live="polite">Loading chart…</div>
-      <div class="tv-stats-grid"></div><details class="tv-fundamentals" open><summary>Fundamentals</summary><div class="tv-fundamentals-body"></div></details><div class="tv-extras"></div>
+      <div class="tv-stats-grid"></div>
+      <details class="tv-valuation" open><summary>Value estimate</summary><div class="tv-valuation-output"></div>
+      <details class="tv-assumptions"><summary>Edit P/E assumptions</summary><form class="tv-valuation-form" novalidate>
+      <div class="tv-valuation-inputs">${['bear', 'base', 'bull'].map(key => `<label>${key[0].toUpperCase() + key.slice(1)} P/E<input name="${key}" aria-label="${key[0].toUpperCase() + key.slice(1)} P/E" type="number" min="0.01" max="200" step="any" required></label>`).join('')}</div>
+      <div class="tv-valuation-buttons"><button type="submit">Apply</button><button type="button" data-action="valuation-reset">Reset to examples</button></div><p class="tv-valuation-feedback" role="status"></p></form></details></details>
+      <details class="tv-fundamentals" open><summary>Fundamentals</summary><div class="tv-fundamentals-body"></div></details><div class="tv-extras"></div>
       <details class="tv-news"><summary>News and sentiment</summary><div class="tv-news-body"></div></details>
       <details class="tv-guide"><summary>Indicator guide</summary><p>RS compares session returns in percentage points, only for matching market dates. Volume / avg day compares current session volume with the prior 50 full sessions; it is not time-of-day RVOL. ATR uses Wilder smoothing. VWAP is a close × volume estimate from five-minute regular-session bars. Daily indicators combine cached history with the current intraday session when available. History and profile retrieval times appear on the card. Sentiment uses headline keywords, ignores articles older than 48 hours, and fades toward neutral with age.</p></details>
       <div class="tv-messages" role="status"></div><nav class="tv-research-dock" aria-label="Research links"></nav>`;
@@ -269,6 +344,7 @@
       const formatted = format === 'percent' ? number(value * 100, '%') : format === 'cash' ? compactNumber(value) : number(value, format === 'ratio' ? '×' : '');
       return `<div class="tv-stat-item" data-fundamental="${key}"><span class="tv-stat-label">${label}</span><span class="tv-stat-value">${['cash', 'eps'].includes(format) ? `${escape(currency || 'Currency unreported')} ` : ''}${formatted}</span></div>`;
     }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`;
+    renderValuation(q);
     let extras = '';
     if (q.earningsTimestamp) {
       const day = time => new Intl.DateTimeFormat('en-CA', { timeZone: q.timezone || 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(time));
@@ -280,13 +356,6 @@
     else if (q.earningsDate) extras += `<p>Earnings: ${escape(q.earningsDate)}</p>`;
     if (q.extendedPrice != null) extras += `<p>Extended: ${money(q.extendedPrice)}${q.extendedTime ? ` · ${escape(new Date(q.extendedTime * 1000).toLocaleString())}` : ''} · profile snapshot</p>`;
     if (q.shortInterestTimestamp && (q.shortFloatPct != null || q.shortRatio != null)) extras += `<p class="tv-missing">Short interest reported: ${escape(new Date(q.shortInterestTimestamp * 1000).toLocaleDateString())}</p>`;
-    if (q.targetLow != null && q.targetHigh != null) {
-      const min = Math.min(q.targetLow, q.regularMarketPrice ?? q.targetLow) * .95;
-      const max = Math.max(q.targetHigh, q.regularMarketPrice ?? q.targetHigh) * 1.05;
-      const pos = value => Math.max(0, Math.min(100, (value - min) / (max - min || 1) * 100));
-      extras += `<div class="tv-targets"><div>Analyst targets · ${number(q.analystCount, '', 0)} analysts · ${escape(q.recKey || '')}</div><div class="tv-target-track">${[['Low', q.targetLow], ['Mean', q.targetMean], ['High', q.targetHigh], ['Price', q.regularMarketPrice]].filter(([,v]) => v != null).map(([label, value]) => `<span style="left:${pos(value)}%" title="${label}: ${number(value)}"></span>`).join('')}</div><div>Low ${number(q.targetLow)} · Mean ${number(q.targetMean)} · High ${number(q.targetHigh)}</div></div>`;
-    }
-    if (q.targetMean != null && (q.targetLow == null || q.targetHigh == null)) extras += `<p>Analyst mean target: ${money(q.targetMean)} · snapshot</p>`;
     if (missing.length) extras += `<p class="tv-missing">Unavailable: ${escape(missing.join(', '))}.</p>`;
     const dates = [['Daily history', state.statuses.technicals], [state.sources?.profile?.provider ? `Fundamentals (${state.sources.profile.provider})` : 'Fundamentals', state.sources?.profile], ['News', state.sources?.news], ['SPY', state.sources?.spy], ['Sector', state.sources?.sector]].filter(([,v]) => v);
     extras += `<div class="tv-source-dates">${dates.map(([label, s]) => `${label}: ${new Date(s.fetchedAt).toLocaleString()}${s.stale ? ' (stale)' : ''}`).map(escape).join('<br>')}</div>`;
@@ -346,6 +415,7 @@
     if (!button || !state) return;
     if (button.dataset.range) { void selectRange(button.dataset.range); return; }
     const action = button.dataset.action;
+    if (action === 'valuation-reset') { void saveValuation(true); return; }
     if (action === 'close') close();
     if (action === 'pin') { pinned = !pinned; button.textContent = pinned ? 'Unpin' : 'Pin'; button.setAttribute('aria-pressed', String(pinned)); position(); }
     if (action === 'refresh') void load(state.ticker, false);
@@ -414,17 +484,19 @@
   });
   modal.addEventListener('keydown', event => {
     if (!popup || event.key !== 'Tab') return;
-    const focusable = [...modal.querySelectorAll('button:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
+    const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.valuationScenarios) { valuationScenarios = changes.valuationScenarios.newValue || {}; if (state) renderValuation(state.quote); }
     if (changes.settings) { settings = TickerView.settings(changes.settings.newValue); applySettings(); }
     if (changes.watchlist) { watchlist = changes.watchlist.newValue || []; if (state) render(); }
   });
-  chrome.storage.local.get(['settings', 'watchlist']).then(values => {
+  chrome.storage.local.get(['settings', 'watchlist', 'valuationScenarios']).then(values => {
+    valuationScenarios = values.valuationScenarios || {};
     settings = TickerView.settings(values.settings); watchlist = values.watchlist || []; applySettings();
   }).catch(() => applySettings());
 })();

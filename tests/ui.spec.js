@@ -19,11 +19,18 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
     window.chrome = {
       storage: { local: { get: async () => structuredClone(values) }, onChanged: { addListener: fn => listeners.push(fn) } },
       tabs: { query: async () => [{ url: 'https://x.com/tickerview-test' }] },
+      windows: { create: async options => { window.createdWindow = options; return { id: 123 }; }, getCurrent: async () => ({ id: 123 }), update: async (id, options) => { window.resizedWindow = { id, ...options }; } },
       runtime: {
         getURL: path => `https://x.com/tickerview-assets/${path}`,
-        getManifest: () => ({ content_scripts: [{ matches: ['https://*.x.com/*'] }] }),
+        getManifest: () => ({ content_scripts: [{ matches: ['https://*.x.com/*', 'https://*.finance.yahoo.com/*'] }] }),
         sendMessage: async request => {
           window.testCalls.push(request);
+          if (['saveValuation', 'resetValuation'].includes(request.action)) {
+            const valuationScenarios = { ...values.valuationScenarios };
+            if (request.action === 'resetValuation') delete valuationScenarios[request.ticker];
+            else valuationScenarios[request.ticker] = TickerView.valuationAssumptions(request.assumptions);
+            await window.updateStorage({ valuationScenarios }); return { success: true, valuationScenarios };
+          }
           if (request.action === 'recent') return { success: true };
           if (request.action === 'library') {
             values.watchlist = TickerView.cleanSymbols(values.watchlist); values.recent = TickerView.cleanSymbols(values.recent, 12);
@@ -53,7 +60,7 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
           if (request.action === 'chart') return { success: true, chart: { points: points.map(p => ({ ...p, close: p.close + 20 })), interval: '1d', timezone: 'America/New_York' }, status };
           if (request.action === 'base') return { success: true, quote: { symbol: ticker, longName: ticker, currency: 'USD', exchange: 'NASDAQ', quoteTime: Date.now() / 1000, sessionDate: '2026-10-23', marketState: 'regular', regularMarketPrice: 114, regularMarketChange: 4, regularMarketChangePercent: 4 }, chart: { points, interval: '5m', timezone: 'America/New_York' }, status };
           if (request.action === 'technicals') return { success: true, quote: { rsi: 55, gapPct: 1, regularMarketChangePercent: 4 }, sessionDate: '2026-10-23', status };
-          return { success: true, quote: { longName: `${ticker} Company`, sector: 'Technology', marketCap: 1.6e12, fundamentals: { trailingPE: 20, trailingEps: -2, revenue: 4e12, currency: 'JPY', quoteCurrency: 'USD', revenueGrowth: 0, profitMargin: -.02, totalDebt: 0 }, shortFloatPct: 1.53, shortRatio: 1.72, targetMean: 846, categorySentiment: { total: { label: 'Bullish', count: 1, score: 1 }, ...Object.fromEntries(['corporate','macro','regulation','retail'].map(cat => [cat, { label: 'Neutral', count: 0 }])), items: [{ title: 'Company surge', time: Date.now() / 1000, url: 'javascript:alert(1)', decay: 1, score: 2, matched: ['surge'] }] } }, benchmarks: { spy: { change: 2, date: '2026-10-23' }, sector: { change: 1, date: '2026-10-22' } }, sources: { profile: { ...status, provider: 'Yahoo Finance' } }, issues: [] };
+          return { success: true, quote: { instrumentType: ticker === 'FUND' ? 'ETF' : 'EQUITY', longName: `${ticker} Company`, sector: 'Technology', marketCap: 1.6e12, fundamentals: { trailingPE: 20, trailingEps: ticker === 'LOSS' ? -2 : 4, revenue: 4e12, currency: 'JPY', quoteCurrency: 'USD', revenueGrowth: 0, profitMargin: -.02, totalDebt: 0 }, shortFloatPct: 1.53, shortRatio: 1.72, targetMean: 846, categorySentiment: { total: { label: 'Bullish', count: 1, score: 1 }, ...Object.fromEntries(['corporate','macro','regulation','retail'].map(cat => [cat, { label: 'Neutral', count: 0 }])), items: [{ title: 'Company surge', time: Date.now() / 1000, url: 'javascript:alert(1)', decay: 1, score: 2, matched: ['surge'] }] } }, benchmarks: { spy: { change: 2, date: '2026-10-23' }, sector: { change: 1, date: '2026-10-22' } }, sources: { profile: { ...status, provider: 'Yahoo Finance' } }, issues: [] };
         }
       }
     };
@@ -84,11 +91,11 @@ test('progressive card, stale-response protection, pin, watchlist, chart, keyboa
   await expect(page.locator('.tv-source-dates')).toContainText('Yahoo Finance');
   await expect(page.locator('.tv-fundamentals')).toHaveAttribute('open', '');
   await expect(page.locator('[data-fundamental="revenue"]')).toContainText('JPY 4T');
-  await expect(page.locator('[data-fundamental="trailingEps"]')).toContainText('USD -2');
+  await expect(page.locator('[data-fundamental="trailingEps"]')).toContainText('USD 4');
   await expect(page.locator('[data-fundamental="revenueGrowth"]')).toContainText('0%');
   await expect(page.locator('[data-fundamental="profitMargin"]')).toContainText('-2%');
   await expect(page.locator('[data-fundamental="freeCashFlow"]')).toHaveCount(0);
-  await expect(page.locator('.tv-extras')).toContainText('Analyst mean target: USD 846');
+  await expect(page.locator('[data-target="mean"]')).toContainText('USD 846');
   await page.locator('[data-action="pin"]').click();
   await page.mouse.move(950, 700);
   await expect(page.locator('#tickerview-modal')).toBeVisible();
@@ -274,4 +281,124 @@ test('popup presets, master switch, validated entry, cached rows, cards, recent 
   await page.locator('#clear-recent').click(); await expect(page.locator('#recent .symbol')).toHaveCount(0);
   await expect(page.locator('#clear-recent')).toBeDisabled();
   await expect(page.locator('#watchlist .watch-row')).toHaveCount(2);
+});
+
+test('value estimates preserve drafts and focus through refresh, save by stock, sync and reset', async ({ page }) => {
+  await mockChrome(page);
+  await page.locator('#one .tickerview-highlight').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 80');
+  await expect(page.locator('.tv-valuation-output')).toContainText('Illustrative examples');
+  await page.locator('.tv-assumptions > summary').click();
+  const base = page.getByRole('spinbutton', { name: 'Base P/E', exact: true });
+  await base.fill('30');
+  await page.locator('[data-action="refresh"]').click();
+  await base.focus();
+  await expect(page.locator('.tv-messages')).not.toContainText('Loading');
+  await expect(base).toHaveValue('30'); await expect(base).toBeFocused();
+  await page.locator('.tv-valuation-form button[type="submit"]').click();
+  await expect(page.locator('.tv-valuation-feedback')).toContainText('bear ≤ base ≤ bull');
+  await page.getByRole('spinbutton', { name: 'Bull P/E', exact: true }).fill('40');
+  await page.locator('.tv-valuation-form button[type="submit"]').click();
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 120');
+  await expect(page.locator('.tv-valuation-output')).toContainText('Your saved assumptions');
+  await page.evaluate(() => window.updateStorage({ valuationScenarios: { AAPL: { bear: 10, base: 25, bull: 40 } } }));
+  await expect(base).toHaveValue('25');
+  await base.fill('27');
+  await page.evaluate(() => window.updateStorage({ valuationScenarios: { AAPL: { bear: 10, base: 26, bull: 40 } } }));
+  await expect(base).toHaveValue('27');
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 104');
+  await page.locator('[data-action="valuation-reset"]').click();
+  await expect(base).toHaveValue('20');
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 80');
+  await page.keyboard.press('Escape');
+  await page.locator('#two .tickerview-highlight').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 80');
+  await page.evaluate(() => window.updateStorage({ valuationScenarios: { MSFT: { bear: 10, base: 35, bull: 50 } } }));
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 140');
+  await page.setViewportSize({ width: 360, height: 740 });
+  expect(await page.locator('.tv-valuation').evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+});
+test('negative earnings and ETFs explain unavailable models while retaining analyst targets', async ({ page }) => {
+  await mockChrome(page);
+  await page.evaluate(() => { document.querySelector('#one').textContent = '$LOSS'; document.querySelector('#two').textContent = '$FUND'; });
+  for (const [id, text] of [['one', 'positive trailing'], ['two', 'only for stocks']]) {
+    await page.locator(`#${id} .tickerview-highlight`).focus(); await page.keyboard.press('Enter');
+    await expect(page.locator('.tv-valuation-output')).toContainText(text);
+    await expect(page.locator('[data-scenario]')).toHaveCount(0);
+    await expect(page.locator('[data-target="mean"]')).toContainText('USD 846');
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('popup valuation inputs participate in keyboard navigation and retain models without targets', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { recent: ['AAPL'] } });
+  await page.evaluate(() => {
+    const send = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = async request => {
+      const result = await send(request);
+      if (request.action === 'details') {
+        result.quote.targetMean = null;
+        result.sources.profile.stale = true;
+      }
+      return result;
+    };
+  });
+  await page.getByRole('button', { name: 'Open AAPL stock card' }).click();
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 80');
+  await expect(page.locator('.tv-valuation-output')).toContainText('STALE cache');
+  await expect(page.locator('.tv-analyst-comparison')).toContainText('unavailable');
+  await page.locator('.tv-assumptions > summary').click();
+  await page.getByRole('spinbutton', { name: 'Bear P/E', exact: true }).focus();
+  await page.keyboard.press('Tab'); await expect(page.getByRole('spinbutton', { name: 'Base P/E', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(page.getByRole('spinbutton', { name: 'Bull P/E', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(page.locator('.tv-valuation-form button[type="submit"]')).toBeFocused();
+  await page.locator('.tv-research-dock a').last().focus(); await page.keyboard.press('Tab');
+  await expect(page.locator('[data-action="pin"]')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Open AAPL stock card' })).toBeFocused();
+});
+
+test('analyst comparison retains recommendation and original colored target range', async ({ page }) => {
+  await mockChrome(page);
+  await page.evaluate(() => {
+    const send = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = async request => {
+      const result = await send(request);
+      if (request.action === 'details') Object.assign(result.quote, { targetLow: 90, targetMean: 110, targetHigh: 140, recKey: 'strong_buy', analystCount: 12 });
+      return result;
+    };
+  });
+  await page.locator('#one .tickerview-highlight').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('.tv-analyst-comparison')).toContainText('12 analysts · Strong buy');
+  const track = page.locator('.tv-target-track');
+  await expect(track).toHaveAttribute('aria-label', /Low: USD 90.*Mean: USD 110.*High: USD 140.*Price: USD 114/);
+  await expect(track.locator('span')).toHaveCount(4);
+  expect(await track.evaluate(node => getComputedStyle(node).backgroundImage)).toContain('linear-gradient');
+  await expect(page.locator('[data-scenario="base"]')).toContainText('USD 80');
+});
+
+test('Expand opens a screen-height window and retains site controls in the expanded layout', async ({ page }) => {
+  await mockChrome(page, { popup: true });
+  await page.evaluate(() => {
+    window.close = () => { window.popupClosed = true; };
+    for (const [key, value] of Object.entries({ availHeight: 1200, availWidth: 1800, availTop: 0, availLeft: 0 })) Object.defineProperty(screen, key, { value, configurable: true });
+  });
+  await page.getByRole('button', { name: 'Expand TickerView into a resizable window' }).click();
+  const options = await page.evaluate(() => window.createdWindow);
+  expect(options).toMatchObject({ type: 'popup', width: 480, height: 1160, top: 20, left: 1300 });
+  expect(new URL(options.url).searchParams.get('site')).toBe('x.com');
+  expect(new URL(options.url).searchParams.get('expanded')).toBe('1');
+  expect(await page.evaluate(() => window.popupClosed)).toBe(true);
+  await page.setViewportSize({ width: 480, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1&site=finance.yahoo.com', initial: { watchlist: ['ASTS', 'NBIS', 'SPY', 'META', 'NVDA'], recent: ['TSLA', 'AXP', 'BTC', 'FFIV', 'MSFT', 'AAPL'] } });
+  await expect(page.locator('body')).toHaveClass(/tv-expanded/);
+  expect(await page.evaluate(() => window.resizedWindow.height)).toBe(await page.evaluate(() => Math.max(300, Math.floor(screen.availHeight - 40))));
+  await expect(page.locator('#expand-popup')).toBeHidden();
+  await expect(page.locator('#site')).toHaveText('finance.yahoo.com');
+  await expect(page.locator('#siteEnabled')).toBeEnabled();
+  await expect(page.locator('#watchlist .watch-row')).toHaveCount(5);
+  await expect(page.locator('footer')).toBeInViewport();
+  const metrics = await page.evaluate(() => ({ body: document.body.scrollWidth <= innerWidth, list: document.querySelector('#watchlist').scrollHeight <= document.querySelector('#watchlist').clientHeight }));
+  expect(metrics).toEqual({ body: true, list: true });
+  await page.screenshot({ path: 'test-results/popup-expanded.png' });
 });

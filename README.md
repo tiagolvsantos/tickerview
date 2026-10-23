@@ -16,6 +16,8 @@ TickerView is a Manifest V3 Chrome extension that highlights stock cashtags on s
 
 ![X Pro and OldTweetDeck cashtag highlighting with currency amounts left as text](images/image6.png)
 
+![Earnings value scenarios, editable P/E assumptions, and separate analyst targets](images/image7.png)
+
 These images show the actual extension interface with illustrative demo data, not live quotes.
 
 ## Branding
@@ -35,6 +37,8 @@ Logo and font assets come from `cerberus_terminal/web/assets/`; palette tokens f
 
 ## Features
 
+- **Full-height window:** clicking the toolbar icon directly opens a resizable window fitted to your available screen height, with the original site controls preserved. This avoids Chrome’s 600-pixel toolbar-popup height limit.
+- **Value estimates:** bear/base/bull prices use trailing EPS × editable P/E assumptions, with differences from the current quote. The initial 15× / 20× / 25× multiples are illustrative examples for every stock, not stock-specific fair values or price forecasts. Save assumptions locally for up to 100 stocks, or reset to examples. Analyst targets appear separately. Negative/missing EPS, unverified instrument types, and currency mismatches explain why the model is unavailable; cached/older data is identified.
 - **Progressive loading:** quote and intraday chart appear independently of fundamentals, news, and benchmarks. Optional provider failures leave the rest of the card usable.
 - **Card controls:** Pin/Unpin, Save, Refresh, Close, and Escape. A pinned card stays in place while the page scrolls. Visible cards refresh every minute; refresh pauses in hidden tabs.
 - **Interactive charts:** 1D, 5D, 1M, 6M, and 1Y ranges, aligned volume bars, pointer crosshair, timestamps, and prices. Focus the chart and use Left/Right to inspect points.

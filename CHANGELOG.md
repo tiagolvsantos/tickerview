@@ -7,11 +7,13 @@ All notable changes to this project will be documented in this file.
 Major release introducing the Cerberus redesign, expanded market data, and X Pro / OldTweetDeck support.
 
 ### Changed
-- Replaced the repository screenshots with six 1280 × 800 feature images covering the stock card, watchlist, fundamentals, controls, news and research, and TweetDeck highlighting; refreshed the README gallery and reproducible screenshot generator.
+- Replaced the repository screenshots with seven 1280 × 800 feature images covering the stock card, watchlist, fundamentals, controls, news and research, TweetDeck highlighting, and valuation scenarios; refreshed the README gallery and reproducible screenshot generator.
 - Bumped the Chrome manifest, popup, and development package versions to 2.0.0.
 - Keep Node.js and npm limited to development tools; the extension runs directly in Chrome without a build step.
 
 ### Added
+- Clicking the toolbar icon now directly opens a resizable window fitted to the available screen height, bypassing Chrome’s 600-pixel toolbar-panel limit. The original website context is retained, and watchlists and recent symbols use the extra height.
+- Value estimate panel with editable EPS × P/E bear/base/bull scenarios, quote comparisons, locally saved assumptions for up to 100 stocks, and separate analyst targets. Defaults are explicitly illustrative; ineligible instruments and currency mismatches show an explanation.
 - Expanded Fundamentals section with valuation multiples, EPS, revenue, growth, margins, return on equity, cash flow, cash, and debt; reporting currency is shown separately from the stock quote currency.
 - Reorganized popup with master/site switches, collapsible appearance controls, indicator presets and groups, cached company/price watchlist rows, inline symbol validation, direct popup cards, recent-symbol saving, and Clear history.
 - Cerberus Terminal branding: original three-headed logo in all Chrome icon sizes, navy/silver/orange theme, bundled Montserrat and IBM Plex Mono fonts, and redesigned popup and stock card.
@@ -29,6 +31,7 @@ Major release introducing the Cerberus redesign, expanded market data, and X Pro
 - Pause quote refresh in hidden tabs and avoid duplicate scanning inside embedded frames.
 
 ### Fixed
+- Retain the analyst recommendation label and original colored low/mean/high/current-price target graphic alongside the earnings valuation scenarios.
 - Keep native TweetDeck cashtag links and their nested dollar-sign/ticker spans orange when host link styles override their color.
 - Detect split-span cashtag links in X Pro / OldTweetDeck without replacing their markup, handle recycled rows and body replacement, and retain pinned cards during column scrolling.
 - Clean legacy currency false positives from saved/recent symbols and preserve focus when cached watchlist rows update.

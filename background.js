@@ -59,7 +59,7 @@ async function tech(symbol) {
 async function fundamentals(symbol) {
   // The direct summary API requires authentication. The public statistics page
   // carries the same structured data and works with credential-free requests.
-  return cache.get(`fundamentals:yahoo-page:v2:${symbol}`, 6 * 3600000, async () =>
+  return cache.get(`fundamentals:yahoo-page:v3:${symbol}`, 6 * 3600000, async () =>
     yahooSnapshot(await fetchResource(`https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/key-statistics/`, 'text'), symbol));
 }
 async function details(symbol) {
@@ -144,6 +144,20 @@ async function library() {
 async function handle(request) {
   switch (request.action) {
     case 'library': return library();
+    case 'saveValuation':
+    case 'resetValuation': return editStorage(async () => {
+      const symbol = normalizeSymbol(request.ticker);
+      const assumptions = request.action === 'saveValuation' ? TickerView.valuationAssumptions(request.assumptions) : null;
+      const { valuationScenarios = {} } = await chrome.storage.local.get('valuationScenarios');
+      const next = {};
+      for (const [key, value] of Object.entries(valuationScenarios)) {
+        try { if (key !== symbol && normalizeSymbol(key) === key) next[key] = TickerView.valuationAssumptions(value); } catch { /* Ignore invalid stored assumptions. */ }
+      }
+      if (assumptions) next[symbol] = assumptions;
+      const bounded = Object.fromEntries(Object.entries(next).slice(-100));
+      await chrome.storage.local.set({ valuationScenarios: bounded });
+      return { valuationScenarios: bounded };
+    });
     case 'clearRecent': return editStorage(async () => { await chrome.storage.local.set({ recent: [] }); return {}; });
     case 'addWatch': {
       const ticker = normalizeSymbol(request.ticker);
@@ -198,4 +212,28 @@ chrome.runtime.onMessage.addListener((request, sender, respond) => {
   if (sender.id !== chrome.runtime.id || !request || typeof request.action !== 'string') return false;
   handle(request).then(data => respond({ success: true, ...data }), error => respond({ success: false, error: error.message || 'Unable to load data' }));
   return true;
+});
+
+// Toolbar panels have a browser-enforced height limit. Open our own resizable
+// window instead; its page then fits itself to the display's available bounds.
+let launcherWindowId, launcherTask;
+async function openLauncher(tab) {
+  const url = new URL(chrome.runtime.getURL('popup.html'));
+  url.searchParams.set('expanded', '1');
+  try { const source = new URL(tab?.url); if (source.protocol === 'https:') url.searchParams.set('site', source.hostname); } catch { /* Internal browser pages have no supported site. */ }
+  if (launcherWindowId != null) {
+    try {
+      const existing = await chrome.windows.get(launcherWindowId, { populate: true });
+      await chrome.tabs.update(existing.tabs[0].id, { url: url.href });
+      await chrome.windows.update(launcherWindowId, { focused: true });
+      return;
+    } catch { launcherWindowId = null; }
+  }
+  const created = await chrome.windows.create({ url: url.href, type: 'popup', width: 480, height: 600 });
+  launcherWindowId = created.id;
+}
+chrome.action.onClicked.addListener(tab => {
+  if (launcherTask) return launcherTask;
+  launcherTask = openLauncher(tab).catch(error => console.error('Unable to open TickerView', error)).finally(() => { launcherTask = null; });
+  return launcherTask;
 });

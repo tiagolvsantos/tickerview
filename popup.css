@@ -64,3 +64,12 @@ h2::before { content: ''; width: 3px; height: 10px; background: var(--tv-accent)
 footer { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-top: 1px solid var(--tv-border); margin-top: 14px; padding-top: 10px; color: var(--tv-muted); font-size: 10px; }
 .footer-brand { font: 8px/1.6 var(--tv-mono); letter-spacing: .12em; }#keyboard-help { text-align: right; }#keyboard-help p { max-width: 270px; text-align: left; line-height: 1.7; margin-bottom: 0; }
 kbd { font: 9px var(--tv-mono); border: 1px solid var(--tv-border); border-radius: 2px; padding: 1px 3px; }.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.header-actions { align-self: stretch; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 6px; }
+#expand-popup { padding: 3px 6px; color: var(--tv-accent); font-size: 9px; }
+#expand-popup[hidden] { display: none; }
+body.tv-expanded { width: 100%; min-width: 320px; min-height: 100vh; }
+body.tv-expanded .watchlist { max-height: none; }
+body.tv-expanded .symbols { max-height: none; }
+body.tv-expanded #indicators { max-height: min(360px, 45vh); }
+@media (max-width: 419px) { body { width: 100%; } }
