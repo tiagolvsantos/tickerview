@@ -114,3 +114,10 @@ html body a.tickerview-highlight[data-tv-link]:is(:hover, :focus-visible) {
 #tickerview-modal .tv-valuation-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 #tickerview-modal .tv-valuation-feedback { color: var(--tv-accent); font: 10px/1.6 var(--tv-sans); }
 #tickerview-modal .tv-assumptions { margin-top: 10px; }
+
+#tickerview-modal .tv-note { margin: 10px 0; padding: 8px; border: 1px solid var(--tv-border); background: var(--tv-panel); }
+#tickerview-modal .tv-note label { display: block; margin: 8px 0 4px; font-size: 10px; }
+#tickerview-modal .tv-note textarea { box-sizing: border-box; display: block; width: 100%; resize: vertical; min-height: 80px; max-height: 240px; padding: 8px; border: 1px solid var(--tv-border-strong); background: var(--tv-control); color: var(--tv-text); font: 11px/1.5 var(--tv-mono); margin-bottom: 8px; }
+#tickerview-modal .tv-note-status { font-size: 10px; color: var(--tv-muted); }
+#tickerview-modal .tv-note-prompt { padding: 8px; border: 1px solid var(--tv-accent); }
+#tickerview-modal .tv-note [hidden] { display: none; }

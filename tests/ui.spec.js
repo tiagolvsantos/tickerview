@@ -1,5 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { createBackup, prepareImport } from '../backup.js';
+test.beforeEach(async ({ page }) => {
+  await page.exposeFunction('backupOperation', (request, values) => {
+    try {
+      if (request.action === 'exportBackup') return { success: true, backup: createBackup(values) };
+      const result = prepareImport(values, JSON.parse(request.json), request.mode);
+      return { success: true, summary: result.summary, ...(request.action === 'importBackup' ? { patch: result.patch } : {}) };
+    } catch (error) { return { success: false, error: error.message }; }
+  });
+});
 const file = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
 async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.com/tickerview-test' } = {}) {
   await page.route('https://x.com/**', route => route.fulfill({ contentType: 'text/html', body: '<html><body><p id="one">Watching $AAPL</p><p id="two" style="margin-left:650px">Compare $MSFT</p><textarea>$EDIT</textarea><div contenteditable="true">$DRAFT</div></body></html>' }));
@@ -10,8 +20,9 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
   });
   await page.goto(url);
   await page.evaluate(initial => {
-    const values = { settings: { hoverDelay: 0 }, watchlist: [], recent: [], ...initial }, listeners = [];
+    const values = { dashboardPreferences: { autoRefresh: false }, settings: { hoverDelay: 0 }, watchlist: [], recent: [], ...initial }, listeners = [];
     window.testCalls = [];
+    window.testCurrentWindow = { id: 123, width: 480, height: 800, left: 0, top: 0, state: 'normal', ...(initial.testWindow || {}) };
     window.updateStorage = async patch => {
       const changes = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, { oldValue: values[key], newValue: value }]));
       Object.assign(values, patch); listeners.forEach(fn => fn(changes, 'local'));
@@ -19,17 +30,63 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
     window.chrome = {
       storage: { local: { get: async () => structuredClone(values) }, onChanged: { addListener: fn => listeners.push(fn) } },
       tabs: { query: async () => [{ url: 'https://x.com/tickerview-test' }] },
-      windows: { create: async options => { window.createdWindow = options; return { id: 123 }; }, getCurrent: async () => ({ id: 123 }), update: async (id, options) => { window.resizedWindow = { id, ...options }; } },
+      windows: { create: async options => { window.createdWindow = options; return { id: 123 }; }, getCurrent: async () => ({ ...window.testCurrentWindow }), update: async (id, options) => { window.resizedWindow = { id, ...options }; Object.assign(window.testCurrentWindow, options); return { ...window.testCurrentWindow }; } },
       runtime: {
         getURL: path => `https://x.com/tickerview-assets/${path}`,
         getManifest: () => ({ content_scripts: [{ matches: ['https://*.x.com/*', 'https://*.finance.yahoo.com/*'] }] }),
         sendMessage: async request => {
           window.testCalls.push(request);
+          if (['exportBackup', 'previewImport', 'importBackup'].includes(request.action)) {
+            const result = await window.backupOperation(request, values);
+            if (result.patch) await window.updateStorage(result.patch);
+            return result;
+          }
           if (['saveValuation', 'resetValuation'].includes(request.action)) {
             const valuationScenarios = { ...values.valuationScenarios };
             if (request.action === 'resetValuation') delete valuationScenarios[request.ticker];
             else valuationScenarios[request.ticker] = TickerView.valuationAssumptions(request.assumptions);
             await window.updateStorage({ valuationScenarios }); return { success: true, valuationScenarios };
+          }
+          if (request.action === 'getNote') return { success: true, note: values.tickerNotes?.[request.ticker] || { text: '', revision: null } };
+          if (request.action === 'saveNote') {
+            const tickerNotes = { ...values.tickerNotes }, current = tickerNotes[request.ticker] || { text: '', revision: null };
+            if (current.revision !== request.revision) return { success: true, conflict: true, note: current };
+            const note = { text: request.text, revision: crypto.randomUUID() };
+            if (request.text) tickerNotes[request.ticker] = note; else delete tickerNotes[request.ticker];
+            await window.updateStorage({ tickerNotes }); return { success: true, note: request.text ? note : { text: '', revision: null } };
+          }
+          if (request.action === 'setDashboardPreferences') { const dashboardPreferences = TickerView.dashboardPreferences({ ...values.dashboardPreferences, ...request.patch }); await window.updateStorage({ dashboardPreferences }); return { success: true, dashboardPreferences }; }
+          if (request.action === 'saveWindowBounds') {
+            const patch = { windowBounds: request.bounds };
+            if (request.manual) patch.dashboardPreferences = TickerView.dashboardPreferences({ ...values.dashboardPreferences, windowMode: 'remember' });
+            await window.updateStorage(patch); return { success: true };
+          }
+          if (request.action === 'overview') {
+            const marketOverview = values.marketOverview || Object.fromEntries(TickerView.overviewSymbols.map((symbol, i) => [symbol, { name: symbol, price: 100 + i * 10, change: i - 1, changePercent: i - 1, currency: 'USD', ...values.quoteSnapshots?.[symbol], fetchedAt: Date.now(), quoteTime: Date.now()/1000 }]));
+            await window.updateStorage({ marketOverview }); return { success: true, marketOverview, outcomes: {} };
+          }
+          if (request.action === 'setWatchSort') { await window.updateStorage({ watchSort: request.sort }); return { success: true }; }
+          if (['refreshWatchlist', 'refreshDashboard'].includes(request.action)) {
+            if (window.blockRefresh) await new Promise(resolve => { window.releaseRefresh = resolve; });
+            const quoteSnapshots = { ...values.quoteSnapshots }, marketOverview = { ...values.marketOverview }, outcomes = {};
+            const symbols = request.action === 'refreshDashboard' ? [...new Set([...TickerView.overviewSymbols, ...values.watchlist])] : values.watchlist;
+            for (const symbol of symbols) {
+              outcomes[symbol] = symbol === 'FAIL' ? { error: 'offline' } : { stale: false };
+              const quote = { name: symbol + ' Inc.', price: 200, currency: 'USD', change: 10, changePercent: 5, fetchedAt: Date.now() };
+              if (symbol !== 'FAIL' && values.watchlist.includes(symbol)) quoteSnapshots[symbol] = quote;
+              if (symbol !== 'FAIL' && TickerView.overviewSymbols.includes(symbol)) marketOverview[symbol] = quote;
+              await window.updateStorage({ quoteSnapshots: { ...quoteSnapshots }, marketOverview: { ...marketOverview }, watchRefresh: { completed: Object.keys(outcomes).length, total: symbols.length, outcomes: { ...outcomes } } });
+            }
+            return { success: true, outcomes, marketOverview };
+          }
+          if (['saveAlias', 'deleteAlias', 'resetAliases'].includes(request.action)) {
+            const customAliases = request.action === 'resetAliases' ? {} : { ...values.customAliases };
+            if (request.action === 'saveAlias') {
+              if (request.target === 'NOPE') return { success: false, error: 'Could not verify this symbol' };
+              customAliases[TickerView.aliasKey(request.alias)] = TickerView.normalizeSymbol(request.target);
+            }
+            if (request.action === 'deleteAlias') delete customAliases[request.alias];
+            await window.updateStorage({ customAliases }); return { success: true, customAliases };
           }
           if (request.action === 'recent') return { success: true };
           if (request.action === 'library') {
@@ -38,7 +95,7 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
           }
           if (request.action === 'clearRecent') { await window.updateStorage({ recent: [] }); return { success: true }; }
           if (request.action === 'addWatch') {
-            const symbol = TickerView.normalizeSymbol(request.ticker);
+            const symbol = TickerView.resolveSymbol(request.ticker);
             if (symbol === 'NOPE') return { success: false, error: 'Could not verify this symbol' };
             await window.updateStorage({ watchlist: [...new Set([symbol, ...values.watchlist])] });
             return { success: true };
@@ -60,7 +117,7 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
           if (request.action === 'chart') return { success: true, chart: { points: points.map(p => ({ ...p, close: p.close + 20 })), interval: '1d', timezone: 'America/New_York' }, status };
           if (request.action === 'base') return { success: true, quote: { symbol: ticker, longName: ticker, currency: 'USD', exchange: 'NASDAQ', quoteTime: Date.now() / 1000, sessionDate: '2026-10-23', marketState: 'regular', regularMarketPrice: 114, regularMarketChange: 4, regularMarketChangePercent: 4 }, chart: { points, interval: '5m', timezone: 'America/New_York' }, status };
           if (request.action === 'technicals') return { success: true, quote: { rsi: 55, gapPct: 1, regularMarketChangePercent: 4 }, sessionDate: '2026-10-23', status };
-          return { success: true, quote: { instrumentType: ticker === 'FUND' ? 'ETF' : 'EQUITY', longName: `${ticker} Company`, sector: 'Technology', marketCap: 1.6e12, fundamentals: { trailingPE: 20, trailingEps: ticker === 'LOSS' ? -2 : 4, revenue: 4e12, currency: 'JPY', quoteCurrency: 'USD', revenueGrowth: 0, profitMargin: -.02, totalDebt: 0 }, shortFloatPct: 1.53, shortRatio: 1.72, targetMean: 846, categorySentiment: { total: { label: 'Bullish', count: 1, score: 1 }, ...Object.fromEntries(['corporate','macro','regulation','retail'].map(cat => [cat, { label: 'Neutral', count: 0 }])), items: [{ title: 'Company surge', time: Date.now() / 1000, url: 'javascript:alert(1)', decay: 1, score: 2, matched: ['surge'] }] } }, benchmarks: { spy: { change: 2, date: '2026-10-23' }, sector: { change: 1, date: '2026-10-22' } }, sources: { profile: { ...status, provider: 'Yahoo Finance' } }, issues: [] };
+          return { success: true, quote: { instrumentType: ticker.startsWith('^') ? 'INDEX' : ticker.endsWith('-USD') ? 'CRYPTOCURRENCY' : ticker === 'FUND' ? 'ETF' : 'EQUITY', longName: `${ticker} Company`, sector: 'Technology', marketCap: 1.6e12, fundamentals: { trailingPE: 20, trailingEps: ticker === 'LOSS' ? -2 : 4, revenue: 4e12, currency: 'JPY', quoteCurrency: 'USD', revenueGrowth: 0, profitMargin: -.02, totalDebt: 0 }, shortFloatPct: 1.53, shortRatio: 1.72, targetMean: 846, categorySentiment: { total: { label: 'Bullish', count: 1, score: 1 }, ...Object.fromEntries(['corporate','macro','regulation','retail'].map(cat => [cat, { label: 'Neutral', count: 0 }])), items: [{ title: 'Company surge', time: Date.now() / 1000, url: 'javascript:alert(1)', decay: 1, score: 2, matched: ['surge'] }] } }, benchmarks: { spy: { change: 2, date: '2026-10-23' }, sector: { change: 1, date: '2026-10-22' } }, sources: { profile: { ...status, provider: 'Yahoo Finance' } }, issues: [] };
         }
       }
     };
@@ -151,11 +208,13 @@ test('scanning handles dynamic text, international symbols, settings and large f
 test('popup settings, per-site toggle, normalized saved symbols and remove', async ({ page }) => {
   await mockChrome(page, { popup: true });
   await expect(page.locator('#settings')).toBeEnabled();
-  await page.locator('.settings-panel').filter({ hasText: 'Appearance' }).locator('summary').click();
+  await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Cards', exact: true }).click();
   await page.locator('#compact').check();
   await expect(page.locator('#status')).toContainText('Settings saved');
   await page.locator('#siteEnabled').uncheck();
   await expect(page.locator('#siteEnabled')).not.toBeChecked();
+  await page.locator('#close-settings').click();
   await page.locator('#symbol').fill('BRK.B'); await page.locator('#add-symbol button').click();
   await expect(page.locator('#watchlist')).toContainText('BRK-B');
   await page.locator('#symbol').fill('BRK.B'); await page.locator('#add-symbol button').click();
@@ -256,14 +315,16 @@ test('popup presets, master switch, validated entry, cached rows, cards, recent 
   await expect(page.locator('#recent')).not.toContainText('5B');
   await expect(page.locator('#recent')).not.toContainText('500M');
   expect(await page.evaluate(() => window.testCalls.filter(call => ['base','details','technicals'].includes(call.action)))).toEqual([]);
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Cards', exact: true }).click();
   await page.locator('#enabled').uncheck(); await expect(page.locator('#siteEnabled')).toBeDisabled();
   await page.locator('#enabled').check(); await expect(page.locator('#siteEnabled')).toBeEnabled();
-  await page.locator('#indicator-options summary').click(); await page.locator('[data-preset="Essential"]').click();
+  await page.locator('[data-preset="Essential"]').click();
   await expect(page.locator('#indicator-count')).toHaveText('9 selected');
   await expect(page.locator('#indicators legend')).toHaveText(['Technicals', 'Fundamentals']);
   await page.locator('[data-preset="Technical"]').click(); await expect(page.locator('#indicator-count')).toHaveText('18 selected');
   await page.locator('[data-preset="All"]').click(); await expect(page.locator('#indicator-count')).toHaveText('21 selected');
   await page.locator('#indicator-options summary').click();
+  await page.locator('#close-settings').click();
   await page.locator('#symbol').fill('$5B'); await page.locator('#symbol').press('Enter');
   await expect(page.locator('#symbol')).toHaveAttribute('aria-invalid', 'true');
   await expect(page.locator('#symbol-feedback')).toContainText('currency amount');
@@ -377,7 +438,7 @@ test('analyst comparison retains recommendation and original colored target rang
   await expect(page.locator('[data-scenario="base"]')).toContainText('USD 80');
 });
 
-test('Expand opens a screen-height window and retains site controls in the expanded layout', async ({ page }) => {
+test('Expand opens a resizable window fitted to content and retains site controls', async ({ page }) => {
   await mockChrome(page, { popup: true });
   await page.evaluate(() => {
     window.close = () => { window.popupClosed = true; };
@@ -385,14 +446,14 @@ test('Expand opens a screen-height window and retains site controls in the expan
   });
   await page.getByRole('button', { name: 'Expand TickerView into a resizable window' }).click();
   const options = await page.evaluate(() => window.createdWindow);
-  expect(options).toMatchObject({ type: 'popup', width: 480, height: 1160, top: 20, left: 1300 });
+  expect(options).toMatchObject({ type: 'popup', width: 480, height: 600, top: 20, left: 1300 });
   expect(new URL(options.url).searchParams.get('site')).toBe('x.com');
   expect(new URL(options.url).searchParams.get('expanded')).toBe('1');
   expect(await page.evaluate(() => window.popupClosed)).toBe(true);
   await page.setViewportSize({ width: 480, height: 1000 });
   await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1&site=finance.yahoo.com', initial: { watchlist: ['ASTS', 'NBIS', 'SPY', 'META', 'NVDA'], recent: ['TSLA', 'AXP', 'BTC', 'FFIV', 'MSFT', 'AAPL'] } });
   await expect(page.locator('body')).toHaveClass(/tv-expanded/);
-  expect(await page.evaluate(() => window.resizedWindow.height)).toBe(await page.evaluate(() => Math.max(300, Math.floor(screen.availHeight - 40))));
+  expect(await page.evaluate(() => window.resizedWindow.height)).toBeLessThan(await page.evaluate(() => Math.max(300, Math.floor(screen.availHeight - 40))));
   await expect(page.locator('#expand-popup')).toBeHidden();
   await expect(page.locator('#site')).toHaveText('finance.yahoo.com');
   await expect(page.locator('#siteEnabled')).toBeEnabled();
@@ -401,4 +462,274 @@ test('Expand opens a screen-height window and retains site controls in the expan
   const metrics = await page.evaluate(() => ({ body: document.body.scrollWidth <= innerWidth, list: document.querySelector('#watchlist').scrollHeight <= document.querySelector('#watchlist').clientHeight }));
   expect(metrics).toEqual({ body: true, list: true });
   await page.screenshot({ path: 'test-results/popup-expanded.png' });
+});
+
+test('search resolves aliases, opens without saving, and shares notes with canonical watchlist entries', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await mockChrome(page, { popup: true, initial: { watchlist: ['BTC-USD'] } });
+  await page.locator('#search-symbol').fill('$btc'); await page.locator('#search-symbol').press('Enter');
+  await expect(page.locator('.tv-symbol')).toHaveText('$BTC-USD');
+  await expect(page.locator('.tv-summary')).toContainText('Resolved from $btc');
+  await expect(page.locator('.tv-research-dock')).toContainText('Yahoo Finance');
+  await expect(page.locator('.tv-research-dock')).not.toContainText('Finviz');
+  await expect(page.locator('.tv-fundamentals-body')).toContainText('do not apply');
+  await page.locator('.tv-note summary').click();
+  const note = page.locator('#tv-note-text'); await expect(note).toBeEnabled();
+  await note.fill('<img src=x onerror=alert(1)> My thesis'); await page.getByRole('button', { name: 'Save note', exact: true }).click();
+  await expect(page.locator('.tv-note-status')).toHaveText('Saved locally');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Open BTC-USD stock card' }).click();
+  await page.locator('.tv-note summary').click(); await expect(note).toHaveValue('<img src=x onerror=alert(1)> My thesis');
+  await expect(page.locator('.tv-note img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.testCalls.filter(call => call.action === 'addWatch'))).toHaveLength(0);
+  await page.keyboard.press('Escape'); await expect(page.locator('#watchlist .watch-row')).toHaveCount(1);
+  await page.locator('#search-symbol').fill('$5B'); await page.locator('#search-symbol').press('Enter');
+  await expect(page.locator('#search-feedback')).toContainText('currency amount'); expect(errors).toEqual([]);
+});
+test('notes preserve drafts across refresh and ranges and offer cancel, discard, save, and conflict resolution', async ({ page }) => {
+  await mockChrome(page, { popup: true });
+  await page.locator('#search-symbol').fill('AAPL'); await page.locator('#search-symbol').press('Enter');
+  await page.locator('.tv-note summary').click();
+  const note = page.locator('#tv-note-text'); await expect(note).toBeEnabled(); await note.fill('draft');
+  await page.locator('[data-action="refresh"]').click(); await page.locator('[data-range="1M"]').click(); await expect(note).toHaveValue('draft');
+  await page.keyboard.press('Escape'); await expect(page.locator('.tv-note-prompt')).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(note).toHaveValue('draft');
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Save and continue' }).click(); await expect(page.locator('#tickerview-modal')).toBeHidden();
+  await page.locator('#search-symbol').press('Enter'); await page.locator('.tv-note summary').click(); await expect(note).toHaveValue('draft');
+  await note.fill('new draft');
+  await page.evaluate(() => window.updateStorage({ tickerNotes: { AAPL: { text: 'remote', revision: 'remote-1' } } }));
+  await expect(note).toHaveValue('new draft'); await expect(page.locator('.tv-note-conflict')).toBeVisible();
+  await page.getByRole('button', { name: 'Overwrite saved note' }).click(); await expect(page.locator('.tv-note-status')).toHaveText('Saved locally');
+  await note.fill('another draft');
+  await page.evaluate(() => window.updateStorage({ tickerNotes: { AAPL: { text: 'remote again', revision: 'remote-2' } } }));
+  await page.getByRole('button', { name: 'Reload saved note' }).click(); await expect(note).toHaveValue('remote again');
+  await note.fill('discard me'); await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(page.locator('#tickerview-modal')).toBeHidden();
+});
+test('watchlist refresh keeps failed rows and sorts missing data last without fetching on open', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['FAIL', 'B', 'A'], quoteSnapshots: { FAIL: { price: 99, changePercent: -2, name: 'Failure Inc.' }, A: { price: 100, changePercent: 0, name: 'Alpha' } } } });
+  expect(await page.evaluate(() => window.testCalls.filter(call => ['base', 'refreshWatchlist'].includes(call.action)))).toHaveLength(0);
+  await page.getByRole('button', { name: 'Sort by daily percentage change' }).click();
+  await expect(page.locator('.watch-identity strong')).toHaveText(['A', 'FAIL', 'B']);
+  await page.locator('#refresh-watchlist').click();
+  await expect(page.locator('#refresh-feedback')).toContainText('7 checked · 1');
+  await expect(page.locator('.watch-identity strong')).toHaveText(['A', 'B', 'FAIL']);
+  await expect(page.locator('.watch-row').filter({ hasText: 'Failure Inc.' })).toContainText('99');
+  await expect(page.locator('.watch-warning')).toContainText('offline');
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Market', exact: true }).click();
+  await page.locator('#watch-sort').selectOption('saved'); await page.locator('#close-settings').click(); await expect(page.locator('.watch-identity strong')).toHaveText(['FAIL', 'B', 'A']);
+});
+test('custom aliases update existing cashtags and settings overrides reset to built-ins', async ({ page }) => {
+  await mockChrome(page);
+  await page.locator('#one').evaluate(node => { node.textContent = 'Watching $BTC and $VIX'; });
+  const btc = page.locator('.tickerview-highlight').filter({ hasText: '$BTC' });
+  await btc.focus(); await page.keyboard.press('Enter'); await expect(page.locator('.tv-symbol')).toHaveText('$BTC-USD');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.updateStorage({ customAliases: { BTC: 'ETH-USD' } }));
+  await btc.focus(); await page.keyboard.press('Enter'); await expect(page.locator('.tv-symbol')).toHaveText('$ETH-USD');
+  await expect(btc).toHaveText('$BTC');
+  await page.keyboard.press('Escape');
+  await page.locator('#two').evaluate(node => { node.innerHTML = '<a href="https://x.com/search?q=BTC"><span>$</span><span>BTC</span></a>'; });
+  const native = page.locator('#two a'); await expect(native).toHaveClass(/tickerview-highlight/);
+  await native.focus(); await page.keyboard.press('Enter'); await expect(page.locator('.tv-symbol')).toHaveText('$ETH-USD');
+  await expect(native).toHaveAttribute('href', 'https://x.com/search?q=BTC'); await expect(native.locator('span')).toHaveCount(2);
+
+  await mockChrome(page, { popup: true }); await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Aliases', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit alias BTC', exact: true }).click();
+  await page.locator('#alias-target').fill('ETH-USD'); await page.getByRole('button', { name: 'Save alias', exact: true }).click();
+  await expect(page.locator('#alias-list')).toContainText('BTC → ETH-USD (custom)');
+  await page.getByRole('button', { name: 'Delete alias BTC', exact: true }).click();
+  await expect(page.locator('#alias-list')).toContainText('BTC → BTC-USD');
+  await page.locator('#alias-key').fill('COIN'); await page.locator('#alias-target').fill('BTC-USD'); await page.getByRole('button', { name: 'Save alias', exact: true }).click();
+  await expect(page.locator('#alias-list')).toContainText('COIN → BTC-USD (custom)');
+  await page.getByRole('button', { name: 'Reset custom mappings' }).click(); await expect(page.locator('#alias-list')).not.toContainText('COIN');
+});
+
+test('backup downloads JSON, previews without changing data, merges and replaces saved configuration', async ({ page }, testInfo) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL'], customAliases: { LOCAL: '^VIX' }, tickerNotes: { AAPL: { text: 'Local note', revision: 'local' } } } });
+  await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Backup', exact: true }).click();
+  const downloadEvent = page.waitForEvent('download'); await page.locator('#export-backup').click();
+  const download = await downloadEvent; expect(download.suggestedFilename()).toMatch(/^tickerview-backup-.*\.json$/);
+  const path = testInfo.outputPath('backup.json'); await download.saveAs(path);
+  const exported = JSON.parse(await readFile(path, 'utf8'));
+  expect(exported.data.watchlist).toEqual(['AAPL']); expect(exported.data.tickerNotes.AAPL).toEqual('Local note'); expect(exported.data.resourceCache).toBeUndefined();
+  const imported = createBackup({ watchlist: ['BTC-USD'], customAliases: { COIN: 'BTC-USD' }, settings: { compact: true }, tickerNotes: { 'BTC-USD': { text: 'Imported thesis', revision: 'old' } } });
+  const upload = { name: 'backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(imported)) };
+  await page.locator('#import-file').setInputFiles(upload);
+  await expect(page.locator('#import-summary')).toContainText('Watchlist symbols: 1 in file → 2 after import');
+  await expect(page.locator('#watchlist .watch-row')).toHaveCount(1);
+  await page.locator('#cancel-import').click(); await expect(page.locator('#import-preview')).toBeHidden();
+  await expect(page.locator('#watchlist .watch-row')).toHaveCount(1);
+  await page.locator('#import-file').setInputFiles(upload); await expect(page.locator('#import-preview')).toBeVisible();
+  await page.locator('#apply-import').click(); await expect(page.locator('#backup-feedback')).toContainText('Backup imported');
+  await expect(page.locator('.watch-identity strong')).toHaveText(['AAPL', 'BTC-USD']); await expect(page.locator('#compact')).toBeChecked();
+  await page.getByRole('tab', { name: 'Aliases', exact: true }).click(); await expect(page.locator('#alias-list')).toContainText('COIN → BTC-USD');
+  await page.getByRole('tab', { name: 'Backup', exact: true }).click();
+  await page.locator('#import-file').setInputFiles(upload); await page.locator('#import-mode').selectOption('replace');
+  await expect(page.locator('#import-summary')).toContainText('Watchlist symbols: 1 in file → 1 after import');
+  await expect(page.locator('#import-explanation')).toContainText('Replace all'); await page.locator('#apply-import').click();
+  await expect(page.locator('.watch-identity strong')).toHaveText(['BTC-USD']);
+  await page.getByRole('tab', { name: 'Aliases', exact: true }).click(); await expect(page.locator('#alias-list')).not.toContainText('LOCAL');
+  await page.locator('#close-settings').click();
+  await page.locator('#watchlist [data-open-ticker="BTC-USD"]').click(); await page.locator('.tv-note summary').click();
+  await expect(page.locator('#tv-note-text')).toHaveValue('Imported thesis');
+});
+test('invalid and oversized backup files never expose an import button or alter saved entries', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL'] } });
+  await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Backup', exact: true }).click();
+  await page.locator('#import-file').setInputFiles({ name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{') });
+  await expect(page.locator('#backup-feedback')).not.toHaveText('Checking backup…'); await expect(page.locator('#import-preview')).toBeHidden();
+  const unsupported = createBackup({}); unsupported.version = 99;
+  await page.locator('#import-file').setInputFiles({ name: 'future.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(unsupported)) });
+  await expect(page.locator('#backup-feedback')).toContainText('unsupported'); await expect(page.locator('#import-preview')).toBeHidden();
+  await page.locator('#import-file').setInputFiles({ name: 'huge.json', mimeType: 'application/json', buffer: Buffer.alloc(2 * 1024 * 1024 + 1) });
+  await expect(page.locator('#backup-feedback')).toContainText('2 MB'); await expect(page.locator('#watchlist .watch-row')).toHaveCount(1);
+});
+
+test('market-first watchlist table and gear settings work at normal and narrow widths', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 850 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['BTC-USD', 'ASTS', 'NBIS', 'SPY'], recent: ['ETH-USD', 'AAPL'],
+    quoteSnapshots: { 'BTC-USD': { name: 'Bitcoin USD', price: 81296.35, currency: 'USD', change: -16.26, fetchedAt: Date.now(), changePercent: -.02 }, ASTS: { name: 'AST SpaceMobile, Inc.', price: 39.79, currency: 'USD', change: 1.02, fetchedAt: Date.now(), changePercent: 2.63 }, NBIS: { name: 'Nebius Group N.V.', price: 158.74, currency: 'USD', change: -.43, fetchedAt: Date.now(), changePercent: -.27 }, SPY: { name: 'State Street SPDR S&P 500 ETF Trust', price: 759.97, currency: 'USD', change: -3.97, fetchedAt: Date.now(), changePercent: -.52 } }
+  } });
+  await expect(page.locator('#settings-dialog')).toBeHidden();
+  await expect(page.getByRole('table', { name: 'Watchlist quotes' })).toBeVisible();
+  await expect(page.getByRole('columnheader')).toHaveText(['Symbol / company ↕', 'Price ↕', 'Change ↕', 'Actions']);
+  await expect(page.locator('.watch-row').first().locator('td')).toHaveCount(4);
+  expect((await page.locator('#watchlist').boundingBox()).y).toBeLessThan(340);
+  await page.screenshot({ path: 'test-results/market-table.png' });
+  await page.locator('#open-settings').click(); await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Market', exact: true })).toBeFocused();
+  await expect(page.getByRole('switch', { name: 'Auto-refresh', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Aliases', exact: true })).toBeVisible(); await expect(page.getByRole('tab', { name: 'Backup', exact: true })).toBeVisible();
+  await page.screenshot({ path: 'test-results/settings-wheel.png' });
+  await page.keyboard.press('Escape'); await expect(page.locator('#settings-dialog')).toBeHidden(); await expect(page.locator('#open-settings')).toBeFocused();
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Open ASTS stock card' }).click(); await expect(page.locator('.tv-symbol')).toHaveText('$ASTS');
+  await page.keyboard.press('Escape'); await page.locator('#open-settings').click();
+  expect(await page.locator('#settings-dialog').evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth)).toBe(true);
+  await page.getByRole('tab', { name: 'Cards', exact: true }).click(); await page.locator('#compact').check();
+  await page.locator('#close-settings').click(); await expect(page.locator('#watchlist')).toBeVisible();
+  await page.screenshot({ path: 'test-results/market-table-narrow.png' });
+});
+
+test('watchlist shows daily amount and percent, retaining zero and handling partial snapshots', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await mockChrome(page, { popup: true, initial: { watchlist: ['UP', 'DOWN', 'FLAT', 'PARTIAL'], quoteSnapshots: {
+    UP: { price: 100, currency: 'USD', change: 2.5, changePercent: 2.56 },
+    DOWN: { price: 90, currency: 'USD', change: -1.25, changePercent: -1.37 },
+    FLAT: { price: 50, currency: 'USD', change: 0, changePercent: 0 },
+    PARTIAL: { price: 80, currency: 'EUR', changePercent: 1.5 }
+  } } });
+  await expect(page.locator('.watch-change-amount')).toHaveText(['+2.50', '-1.25', '0.00', '—']);
+  await expect(page.locator('.watch-change-percent')).toHaveText(['+2.56%', '-1.37%', '+0.00%', '+1.50%']);
+  await expect(page.locator('.watch-change-amount').nth(1)).toHaveClass(/negative/);
+  await expect(page.locator('.watch-change-amount').first()).toHaveAttribute('title', 'Daily price change (USD)');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('overview strip opens canonical index and crypto cards without saving them', async ({ page }) => {
+  await mockChrome(page, { popup: true });
+  await expect(page.locator('.overview-quote')).toHaveCount(4);
+  await expect(page.locator('.overview-quote strong')).toHaveText(['SPY', 'QQQ', 'VIX', 'BTC']);
+  await expect(page.locator('.overview-price')).toHaveText(['100', '110', '120', '130']);
+  await page.getByRole('button', { name: 'Open VIX market overview card' }).click(); await expect(page.locator('.tv-symbol')).toHaveText('$^VIX');
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Open BTC market overview card' }).click(); await expect(page.locator('.tv-symbol')).toHaveText('$BTC-USD');
+  await page.keyboard.press('Escape'); await expect(page.locator('#watch-count')).toHaveText('0');
+  expect(await page.evaluate(() => window.testCalls.filter(call => call.action === 'overview').length)).toBe(1);
+});
+test('column headers toggle accessible sorting and preserve keyboard focus', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['B', 'A', 'C', 'D'], quoteSnapshots: { A: { price: 30, changePercent: 1 }, B: { price: 10, changePercent: 3 }, C: { price: 20, changePercent: 2 } } } });
+  const price = page.getByRole('button', { name: 'Sort by price', exact: true });
+  await price.click(); await expect(page.locator('.watch-identity strong')).toHaveText(['A', 'C', 'B', 'D']);
+  await expect(page.locator('th').filter({ has: price })).toHaveAttribute('aria-sort', 'descending'); await expect(price).toBeFocused();
+  await page.keyboard.press('Enter'); await expect(page.locator('.watch-identity strong')).toHaveText(['B', 'C', 'A', 'D']);
+  await expect(page.locator('th').filter({ has: price })).toHaveAttribute('aria-sort', 'ascending');
+  await page.getByRole('button', { name: 'Sort by symbol', exact: true }).click(); await expect(page.locator('.watch-identity strong')).toHaveText(['A', 'B', 'C', 'D']);
+  await page.getByRole('button', { name: 'Sort by symbol', exact: true }).click(); await expect(page.locator('.watch-identity strong')).toHaveText(['D', 'C', 'B', 'A']);
+  await page.getByRole('button', { name: 'Sort by daily percentage change' }).click(); await expect(page.locator('.watch-identity strong')).toHaveText(['B', 'C', 'A', 'D']);
+  await expect(page.locator('.watch-heading select')).toHaveCount(0);
+});
+test('freshness uses retrieval time and auto refresh pauses while hidden and resumes without overlaps', async ({ page }) => {
+  const now = Date.parse('2026-10-23T17:00:00Z'); await page.clock.install({ time: now });
+  const marketOverview = Object.fromEntries(['SPY', 'QQQ', '^VIX', 'BTC-USD'].map(symbol => [symbol, { price: 100, changePercent: 1, fetchedAt: now - 30000, quoteTime: (now - 3600000)/1000 }]));
+  await mockChrome(page, { popup: true, initial: { marketOverview } });
+  await expect(page.locator('#dashboard-freshness')).toHaveText('Updated 30 seconds ago');
+  await page.clock.runFor(10000); await expect(page.locator('#dashboard-freshness')).toHaveText('Updated 40 seconds ago');
+  const calls = () => page.evaluate(() => window.testCalls.filter(call => call.action === 'refreshDashboard').length);
+  expect(await calls()).toBe(0);
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Market', exact: true }).click(); await page.locator('#auto-refresh').check();
+  await page.clock.runFor(1); await expect.poll(calls).toBe(1); await page.locator('#close-settings').click();
+  await page.evaluate(() => { window.testHidden = true; Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.testHidden }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.clock.runFor(120000); expect(await calls()).toBe(1); await expect(page.locator('#refresh-countdown')).toHaveText('Paused');
+  await page.evaluate(() => { window.testHidden = false; document.dispatchEvent(new Event('visibilitychange')); });
+  await page.clock.runFor(1); await expect.poll(calls).toBe(2);
+  await page.clock.runFor(15000); await expect.poll(calls).toBe(3);
+  await page.locator('#open-settings').click(); await page.locator('#auto-refresh').uncheck(); await page.clock.runFor(120000); expect(await calls()).toBe(3);
+});
+test('window restores saved bounds, supports fit/full height, and remembers manual resizing', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 1000 }); await page.clock.install();
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: { dashboardPreferences: { autoRefresh: false, windowMode: 'remember' }, windowBounds: { width: 420, height: 640, left: 12, top: 22 } } });
+  await expect.poll(() => page.evaluate(() => window.resizedWindow?.height)).toBe(640);
+  expect(await page.evaluate(() => window.resizedWindow)).toMatchObject({ width: 420, height: 640, left: 12, top: 22 });
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Market', exact: true }).click(); await page.locator('#window-mode').selectOption('full'); await page.locator('#close-settings').click();
+  const maximum = await page.evaluate(() => Math.max(300, screen.availHeight - 40)); await expect.poll(() => page.evaluate(() => window.resizedWindow?.height)).toBe(maximum);
+  await page.locator('#fit-window').click(); await page.clock.runFor(200);
+  await expect.poll(() => page.evaluate(() => window.resizedWindow?.height)).toBeLessThan(maximum);
+  await page.clock.runFor(1000);
+  await page.evaluate(() => { Object.assign(window.testCurrentWindow, { width: 460, height: 700 }); window.dispatchEvent(new Event('resize')); }); await page.clock.runFor(301);
+  await expect.poll(() => page.evaluate(() => window.testCalls.filter(call => call.action === 'saveWindowBounds' && call.manual).length)).toBe(1);
+  await page.locator('#open-settings').click(); await expect(page.locator('#window-mode')).toHaveValue('remember');
+});
+
+test('refresh icon supports manual updates and configurable automatic countdown defaults to 15 seconds', async ({ page }) => {
+  await page.clock.install({ time: Date.parse('2026-10-23T17:00:00Z') });
+  await mockChrome(page, { popup: true, initial: { dashboardPreferences: {} } });
+  await page.clock.runFor(1);
+  const calls = () => page.evaluate(() => window.testCalls.filter(call => call.action === 'refreshDashboard'));
+  await expect.poll(async () => (await calls()).length).toBe(1);
+  await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 15s'); expect((await calls())[0].force).toBe(false);
+  await page.clock.runFor(5000); await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 10s');
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Market', exact: true }).click();
+  await expect(page.locator('#auto-refresh')).toBeChecked(); await expect(page.locator('#refresh-interval')).toHaveValue('15');
+  await page.locator('#refresh-interval').selectOption('30'); await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 30s');
+  await page.locator('#close-settings').click();
+  await page.evaluate(() => { window.blockRefresh = true; });
+  const refresh = page.getByRole('button', { name: 'Refresh market quotes', exact: true }); await refresh.click();
+  await expect(refresh).toHaveAttribute('aria-busy', 'true'); await expect(refresh).toHaveClass(/is-refreshing/); await expect(page.locator('#refresh-countdown')).toHaveText('Refreshing…');
+  expect((await calls()).at(-1).force).toBe(true);
+  await page.evaluate(() => { window.blockRefresh = false; window.releaseRefresh(); });
+  await expect(refresh).toBeEnabled(); await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 30s');
+  await page.clock.runFor(30000); await expect.poll(async () => (await calls()).length).toBe(3);
+  expect((await calls()).at(-1).force).toBe(false);
+});
+
+test('auto refresh is visible on first opening, has a direct enable shortcut, and settings tabs support keyboards', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.clock.install({ time: Date.parse('2026-10-23T17:00:00Z') });
+  await mockChrome(page, { popup: true, initial: { dashboardPreferences: { autoRefresh: false, refreshInterval: 30 } } });
+  await expect(page.locator('#refresh-countdown')).toHaveText('Auto off · Enable');
+  await page.getByRole('button', { name: 'Configure automatic refresh', exact: true }).click();
+  const toggle = page.getByRole('switch', { name: 'Auto-refresh', exact: true });
+  await expect(toggle).toBeVisible(); await expect(toggle).toBeFocused(); await expect(toggle).not.toBeChecked();
+  await expect(page.locator('#auto-refresh-status')).toHaveText('Off'); await expect(page.locator('#refresh-interval')).toBeDisabled();
+  await page.keyboard.press('Space'); await page.clock.runFor(1);
+  await expect(toggle).toBeChecked(); await expect(page.locator('#auto-refresh-status')).toHaveText('On');
+  await expect(page.locator('#refresh-interval')).toBeEnabled(); await expect(page.locator('#auto-refresh-summary')).toContainText('30 seconds');
+  await page.locator('#refresh-interval').selectOption('15'); await expect(page.locator('#auto-refresh-summary')).toContainText('15 seconds');
+  await page.screenshot({ path: 'test-results/settings-refresh-narrow.png' });
+  await page.getByRole('tab', { name: 'Market', exact: true }).focus(); await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Cards', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#enabled')).toBeVisible(); await expect(page.locator('#auto-refresh')).toBeHidden();
+  await page.keyboard.press('End'); await expect(page.getByRole('tab', { name: 'Backup', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#export-backup')).toBeVisible();
+  await page.keyboard.press('Home'); await expect(toggle).toBeVisible();
+  expect(await page.locator('#settings-dialog').evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth)).toBe(true);
+  await toggle.uncheck(); await expect(page.locator('#auto-refresh-status')).toHaveText('Off');
+  await page.locator('#close-settings').click();
+  await page.locator('#open-settings').click(); await expect(toggle).toBeVisible(); await expect(toggle).not.toBeChecked();
+  await expect(page.getByRole('tab', { name: 'Market', exact: true })).toHaveAttribute('aria-selected', 'true');
 });

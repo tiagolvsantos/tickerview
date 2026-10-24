@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const metaHTML = await readFile(new URL('./fixtures/yahoo-meta.html', import.meta.url), 'utf8');
-let listener, launch, values = {}, requests = [], createdWindows = [], updatedWindows = [], updatedTabs = [];
+let listener, launch, values = {}, requests = [], createdWindows = [], updatedWindows = [], updatedTabs = [], launcherMessages = [], command;
 globalThis.chrome = {
+  commands: { onCommand: { addListener: fn => { command = fn; } } },
   action: { onClicked: { addListener: fn => { launch = fn; } } },
-  windows: { create: async options => { createdWindows.push(options); return { id: 55 }; }, get: async () => ({ tabs: [{ id: 77 }] }), update: async (id, options) => { updatedWindows.push({ id, ...options }); } },
-  tabs: { update: async (id, options) => { updatedTabs.push({ id, ...options }); } },
-  runtime: { getURL: path => `chrome-extension://test-extension/${path}`, id: 'test-extension', onMessage: { addListener: fn => { listener = fn; } } },
+  windows: { getAll: async () => [], create: async options => { createdWindows.push(options); return { id: 55 }; }, get: async () => ({ tabs: [{ id: 77 }] }), update: async (id, options) => { updatedWindows.push({ id, ...options }); } },
+  tabs: { query: async () => [{ url: 'https://x.com/' }], update: async (id, options) => { updatedTabs.push({ id, ...options }); } },
+  runtime: { sendMessage: async message => { launcherMessages.push(message); }, getURL: path => `chrome-extension://test-extension/${path}`, id: 'test-extension', onMessage: { addListener: fn => { listener = fn; } } },
   storage: { local: { get: async () => structuredClone(values), set: async v => { Object.assign(values, structuredClone(v)); } } }
 };
 const times = ['2026-10-21T13:30Z', '2026-10-22T13:30Z', '2026-10-23T13:30Z'].map(x => Date.parse(x) / 1000);
@@ -71,7 +72,7 @@ test('library migrates old currency matches and returns cached snapshots without
   const before = requests.length;
   const data = await send({ action: 'library' });
   assert.deepEqual(data.recent, ['META', '7203.T']); assert.deepEqual(values.recent, data.recent);
-  assert.deepEqual(data.watchlist, ['AAPL', 'BRK-B']); assert.equal(data.snapshots.AAPL.price, 110);
+  assert.deepEqual(data.watchlist, ['AAPL', 'BRK-B']); assert.equal(data.snapshots.AAPL.price, 110); assert.equal(data.snapshots.AAPL.change, 10);
   assert.equal(requests.length, before);
 });
 test('manual addition validates data before saving, rejects amounts, and explicit save is idempotent', async () => {
@@ -109,6 +110,128 @@ test('toolbar directly opens and reuses a full-height launcher with the source s
   assert.equal(new URL(createdWindows[0].url).searchParams.get('site'), 'x.com');
   await launch({ url: 'chrome://extensions/' });
   assert.equal(createdWindows.length, 1);
-  assert.equal(new URL(updatedTabs.at(-1).url).searchParams.has('site'), false);
+  assert.equal(updatedTabs.length, 0);
+  assert.equal(launcherMessages.at(-1).site, null);
   assert.deepEqual(updatedWindows.at(-1), { id: 55, focused: true });
+});
+
+test('aliases validate literal targets, override built-ins, and never chain', async () => {
+  const added = await send({ action: 'saveAlias', alias: '$coin', target: 'BTC-USD' });
+  assert.equal(added.customAliases.COIN, 'BTC-USD');
+  await send({ action: 'saveAlias', alias: 'BTC', target: 'ETH-USD' });
+  assert.equal((await send({ action: 'addWatch', ticker: 'btc' })).quote.symbol, 'ETH-USD');
+  await send({ action: 'saveAlias', alias: 'COIN', target: 'BTC' });
+  assert.equal((await send({ action: 'addWatch', ticker: 'COIN' })).quote.symbol, 'BTC');
+  assert.equal((await send({ action: 'saveAlias', alias: '5B', target: 'AAPL' })).success, false);
+  assert.equal((await send({ action: 'saveAlias', alias: 'BAD', target: 'NOTREAL' })).success, false);
+  await send({ action: 'deleteAlias', alias: 'BTC' });
+  assert.equal((await send({ action: 'addWatch', ticker: 'btc' })).quote.symbol, 'BTC-USD');
+  await send({ action: 'resetAliases' }); assert.deepEqual(values.customAliases, {});
+});
+test('one-time alias migration deduplicates lists without moving assumptions or snapshots', async () => {
+  values.aliasMigration = undefined; values.watchlist = ['BTC', 'BTC-USD', 'VIX', '^VIX']; values.recent = ['SPX', '^GSPC'];
+  values.valuationScenarios.BTC = { bear: 1, base: 2, bull: 3 };
+  const result = await send({ action: 'library' });
+  assert.deepEqual(result.watchlist, ['BTC-USD', '^VIX']); assert.deepEqual(result.recent, ['^GSPC']);
+  assert.ok(values.valuationScenarios.BTC);
+  await send({ action: 'saveAlias', alias: 'VIX', target: 'AAPL' });
+  assert.deepEqual((await send({ action: 'library' })).watchlist, result.watchlist);
+  await send({ action: 'resetAliases' });
+});
+test('notes detect concurrent writes, delete explicitly, persist without watchlist membership, and enforce limits', async () => {
+  values.tickerNotes = {};
+  const a = await send({ action: 'saveNote', ticker: 'BTC-USD', text: '<script>thesis</script>', revision: null });
+  assert.equal(a.success, true); assert.ok(a.note.revision);
+  const conflict = await send({ action: 'saveNote', ticker: 'BTC-USD', text: 'stale draft', revision: null });
+  assert.equal(conflict.conflict, true); assert.equal(conflict.note.text, '<script>thesis</script>');
+  const b = await send({ action: 'saveNote', ticker: 'BTC-USD', text: 'new thesis', revision: a.note.revision });
+  await send({ action: 'watch', ticker: 'BTC-USD', saved: false });
+  assert.equal((await send({ action: 'getNote', ticker: 'BTC-USD' })).note.text, 'new thesis');
+  assert.equal((await send({ action: 'saveNote', ticker: 'BTC-USD', text: 'x'.repeat(4001), revision: b.note.revision })).success, false);
+  await send({ action: 'saveNote', ticker: 'BTC-USD', text: '', revision: b.note.revision });
+  assert.equal(Object.hasOwn(values.tickerNotes, 'BTC-USD'), false);
+  for (let i = 0; i < 100; i++) await send({ action: 'saveNote', ticker: `NOTE${i}`, text: 'note', revision: null });
+  assert.equal((await send({ action: 'saveNote', ticker: 'FULL', text: 'note', revision: null })).success, false);
+  assert.equal(Object.keys(values.tickerNotes).length, 100);
+});
+test('refresh limits concurrent requests to three, coalesces refreshes, and preserves saved membership on failures', async () => {
+  values.watchlist = ['REF1', 'REF2', 'NOTREAL', 'REF3', 'REF4'];
+  const original = fetch; let active = 0, peak = 0;
+  globalThis.fetch = async (...args) => { active++; peak = Math.max(peak, active); try { return await original(...args); } finally { active--; } };
+  try {
+    const [a, b] = await Promise.all([send({ action: 'refreshWatchlist' }), send({ action: 'refreshWatchlist' })]);
+    assert.deepEqual(a, b); assert.equal(Object.keys(a.outcomes).length, 5); assert.ok(a.outcomes.NOTREAL.error);
+    assert.ok(peak <= 3); assert.ok(peak > 1); assert.equal(values.watchRefresh.completed, 5);
+    assert.equal(values.watchlist.length, 5);
+    assert.equal(requests.filter(url => url.includes('/REF1?')).length, 1);
+  } finally { globalThis.fetch = original; }
+});
+test('keyboard command reuses launcher without navigating its tab', async () => {
+  await command('open-search'); assert.equal(launcherMessages.at(-1).focusSearch, true);
+  assert.equal(updatedTabs.length, 0); assert.equal(createdWindows.length, 1);
+});
+
+test('launcher discovers an existing window after losing its worker-local window id', async () => {
+  const get = chrome.windows.get, getAll = chrome.windows.getAll;
+  chrome.windows.get = async () => { throw new Error('Old window no longer exists'); };
+  chrome.windows.getAll = async () => [{ id: 88, tabs: [{ url: chrome.runtime.getURL('popup.html') + '?expanded=1' }] }];
+  try {
+    await command('open-search');
+    assert.equal(createdWindows.length, 1); assert.equal(launcherMessages.at(-1).windowId, 88);
+    assert.deepEqual(updatedWindows.at(-1), { id: 88, focused: true });
+  } finally { chrome.windows.get = get; chrome.windows.getAll = getAll; }
+});
+
+test('backup preview is read-only; restore is atomic, offline, and resets note revisions', async () => {
+  values.valuationScenarios = { AAPL: { bear: 10, base: 20, bull: 30 } };
+  values.watchlist = ['BTC-USD']; values.tickerNotes = { 'BTC-USD': { text: 'original note', revision: 'before-import' } };
+  const beforeRequests = requests.length;
+  const exported = await send({ action: 'exportBackup' }); assert.equal(exported.success, true);
+  const backup = exported.backup; backup.data.watchlist = ['ETH-USD']; backup.data.tickerNotes['BTC-USD'] = 'imported note';
+  const json = JSON.stringify(backup), before = structuredClone(values);
+  const preview = await send({ action: 'previewImport', json, mode: 'merge' });
+  assert.equal(preview.success, true); assert.equal(preview.summary.watchlist.total, 2); assert.deepEqual(values, before);
+  const imported = await send({ action: 'importBackup', json, mode: 'merge' }); assert.equal(imported.success, true);
+  assert.deepEqual(values.watchlist, ['BTC-USD', 'ETH-USD']); assert.equal(values.tickerNotes['BTC-USD'].text, 'imported note');
+  const staleSave = await send({ action: 'saveNote', ticker: 'BTC-USD', text: 'old open draft', revision: 'before-import' }); assert.equal(staleSave.conflict, true);
+  await send({ action: 'importBackup', json, mode: 'replace' }); assert.deepEqual(values.watchlist, ['ETH-USD']);
+  assert.equal(requests.length, beforeRequests);
+});
+test('backup rejects invalid JSON, future versions, oversized files and over-limit merges before writing', async () => {
+  const exported = await send({ action: 'exportBackup' });
+  const before = structuredClone(values);
+  for (const json of ['{', JSON.stringify({ ...exported.backup, version: 99 }), ' '.repeat(2 * 1024 * 1024 + 1)]) {
+    assert.equal((await send({ action: 'importBackup', json, mode: 'replace' })).success, false); assert.deepEqual(values, before);
+  }
+  values.watchlist = Array.from({ length: 100 }, (_, i) => `LIMIT${i}`);
+  const full = structuredClone(values);
+  assert.equal((await send({ action: 'importBackup', json: JSON.stringify(exported.backup), mode: 'merge' })).success, false); assert.deepEqual(values, full);
+});
+
+test('overview and dashboard refresh share a three-request queue without saving overview-only symbols', async () => {
+  values.watchlist = ['OV1', 'OV2', 'SPY']; values.recent = ['AAPL']; values.quoteSnapshots = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`Q${i}`, { price: i }]));
+  const original = fetch; let active = 0, peak = 0;
+  globalThis.fetch = async (...args) => { active++; peak = Math.max(peak, active); try { return await original(...args); } finally { active--; } };
+  try {
+    const [overview, dashboard] = await Promise.all([send({ action: 'overview' }), send({ action: 'refreshDashboard' })]);
+    assert.equal(overview.success, true); assert.equal(dashboard.success, true);
+    assert.deepEqual(Object.keys(dashboard.outcomes).sort(), ['SPY', 'QQQ', '^VIX', 'BTC-USD', 'OV1', 'OV2'].sort());
+    assert.deepEqual(Object.keys(values.marketOverview).sort(), ['SPY', 'QQQ', '^VIX', 'BTC-USD'].sort());
+    assert.ok(peak <= 3); assert.ok(peak > 0);
+    assert.equal(Object.hasOwn(values.quoteSnapshots, 'QQQ'), false); assert.equal(Object.hasOwn(values.quoteSnapshots, '^VIX'), false);
+    assert.equal(Object.hasOwn(values.quoteSnapshots, 'BTC-USD'), false); assert.equal(values.quoteSnapshots.SPY.price, 110);
+    assert.deepEqual(values.watchlist, ['OV1', 'OV2', 'SPY']); assert.deepEqual(values.recent, ['AAPL']);
+    const before = requests.length; await send({ action: 'overview' }); assert.equal(requests.length, before);
+  } finally { globalThis.fetch = original; }
+});
+test('market window preferences validate and manual bounds select remembered sizing', async () => {
+  assert.equal((await send({ action: 'setDashboardPreferences', patch: { autoRefresh: 'yes' } })).success, false);
+  await send({ action: 'setDashboardPreferences', patch: { autoRefresh: true, refreshInterval: 15, windowMode: 'fit' } });
+  assert.deepEqual(values.dashboardPreferences, { autoRefresh: true, refreshInterval: 15, windowMode: 'fit' });
+  await send({ action: 'saveWindowBounds', bounds: { width: 620, height: 760, left: 12, top: 20 }, manual: true });
+  assert.equal(values.dashboardPreferences.windowMode, 'remember'); assert.equal(values.dashboardPreferences.autoRefresh, true);
+  const get = chrome.windows.get, getAll = chrome.windows.getAll;
+  chrome.windows.get = async () => { throw new Error('closed'); }; chrome.windows.getAll = async () => [];
+  try { await launch({ url: 'https://x.com/' }); assert.deepEqual({ ...createdWindows.at(-1), url: undefined }, { url: undefined, type: 'popup', width: 620, height: 760, left: 12, top: 20 }); }
+  finally { chrome.windows.get = get; chrome.windows.getAll = getAll; }
 });

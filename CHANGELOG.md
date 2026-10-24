@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-10-23
+
+Minor release adding market overview, configurable refresh, portable backups, ticker aliases, personal notes, and clearer settings.
+
+### Added
+- Reorganized gear settings into Market, Cards, Aliases, and Backup tabs with keyboard navigation. Auto-refresh is immediately visible on the default Market tab with an On/Off switch, interval, and status; the main countdown/“Auto off · Enable” button opens it directly. Separated website highlighting from quote refresh controls.
+- Compact SPY, QQQ, VIX, and BTC market overview with canonical card links, shared cached requests, partial-failure handling, and a shared three-request refresh queue.
+- Clickable Symbol, Price, and Change column headers with ascending/descending sorting and accessible sort states; moved the sort dropdown into gear settings.
+- Retrieval-age freshness indicator, circular-arrow manual refresh button with a loading animation, and a live countdown. Automatic refresh defaults to 15 seconds, supports configurable 15/30-second or 1/2/5-minute intervals, pauses while hidden, and avoids overlapping refreshes. Dashboard cache freshness follows the configured interval; manual refresh requests fresh data while preserving failure cooldowns.
+- Content-fitted initial window, remembered manual dimensions, and Fit to content / Full height controls; market preferences travel in backups while window bounds stay local, with older backups still supported.
+- Show daily price change in quote-currency amount alongside percentage change in the watchlist table, with directional colors and preserved zero values.
+- Market-first extension window with aligned Symbol/company, Price, and Change watchlist columns. Centralized extension controls, appearance, indicators, aliases, and export/import in an accessible gear-button settings dialog.
+- Export/import JSON backups covering settings, watchlists, recents, sort order, custom aliases, notes, and valuation assumptions, with a preview, Merge/Replace choices, strict validation, and offline restores that preserve open drafts. Quotes and caches are excluded.
+- Direct ticker/alias search and configurable Alt+Shift+T shortcut; reuse the existing window without reloading or losing drafts.
+- Built-in Yahoo aliases for common indices and BTC/ETH, plus provider-verified local custom overrides and reset controls. Canonical symbols share saved data; alias changes never redirect existing saved instruments.
+- Resolve aliases when hovering or keyboard-opening cashtags, searching, and manually adding watchlist symbols, including `$VIX` → `^VIX`, `$BTC` → `BTC-USD`, `$ETH` → `ETH-USD`, and `$SPX` → `^GSPC`. Preserve original page text and native link destinations while showing the resolved symbol in the card.
+- Apply custom alias changes to already-open pages without requiring a page refresh.
+- Watchlist quote refresh with three-request concurrency, progress and partial failure labels, plus persistent symbol/company/daily-change sorting.
+- Local per-ticker notes with explicit saves, draft protection, revision conflicts, deletion, and bounded storage.
+- Canonical Yahoo research links and instrument-appropriate index/crypto fundamentals messaging.
+
 ## [2.0.0] - 2026-10-23
 
 Major release introducing the Cerberus redesign, expanded market data, and X Pro / OldTweetDeck support.

@@ -58,7 +58,7 @@ export function priceData(result) {
   const vol = volumeBars.reduce((a, b) => a + b.volume, 0);
   const vwap = vol ? volumeBars.reduce((a, b) => a + b.close * b.volume, 0) / vol : null;
   return {
-    symbol: m.symbol, longName: m.longName || m.shortName || m.symbol,
+    symbol: m.symbol, ...(m.instrumentType ? { instrumentType: m.instrumentType } : {}), longName: m.longName || m.shortName || m.symbol,
     currency: m.currency || '', exchange: m.fullExchangeName || m.exchangeName || '', timezone,
     quoteTime: m.regularMarketTime, sessionDate: date, marketState,
     regularMarketPrice: price, regularMarketChange: change,

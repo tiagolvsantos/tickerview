@@ -163,29 +163,119 @@
     const top = rect.bottom + height + 10 <= innerHeight ? rect.bottom + 8 : rect.top - height - 8;
     modal.style.top = `${Math.max(8, Math.min(top, innerHeight - height - 8))}px`;
   }
-  function close() {
+  function closeNow() {
     generation++; chartGeneration++; clearTimeout(refreshTimer); clearTimeout(hoverTimer); clearTimeout(hideTimer);
     const returnFocus = modal.contains(document.activeElement), ticker = state?.ticker;
-    modal.hidden = true; pinned = false; state = null;
+    modal.hidden = true; pinned = false; state = null; noteState = null;
     for (const [element, value] of inertElements) element.inert = value;
     inertElements.clear();
     const button = anchor?.isConnected ? anchor : popup ? [...document.querySelectorAll('[data-open-ticker]')].find(node => node.dataset.openTicker === ticker) : null; anchor = null;
     if (returnFocus && button?.isConnected) button.focus({ preventScroll: true });
+    if (popup) document.dispatchEvent(new CustomEvent('tickerview:closed'));
   }
+  let noteState = null, leavePending = null;
+  const noteDirty = () => noteState && noteState.text !== noteState.saved;
+  function renderNote() {
+    const box = modal.querySelector('.tv-note');
+    if (!box || !noteState) return;
+    const input = box.querySelector('textarea');
+    if (input.value !== noteState.text) input.value = noteState.text;
+    input.disabled = !noteState.ready || noteState.saving;
+    box.querySelector('[data-action="note-save"]').disabled = !noteState.ready || noteState.saving;
+    box.querySelector('.tv-note-status').textContent = noteState.message || (noteDirty() ? 'Unsaved changes' : noteState.saved ? 'Saved locally' : 'Local only · 4,000 characters maximum');
+    box.querySelector('.tv-note-conflict').hidden = !noteState.conflict;
+  }
+  async function readNote(ticker) {
+    const current = noteState;
+    try {
+      const result = await request('getNote', { ticker });
+      if (noteState !== current) return;
+      const note = result.note || { text: '', revision: null };
+      Object.assign(current, { text: note.text, saved: note.text, revision: note.revision, ready: true }); renderNote();
+    } catch (error) { if (noteState === current) { current.message = error.message; renderNote(); } }
+  }
+  async function saveNote(overwrite = false) {
+    const current = noteState, ticker = state?.ticker;
+    if (!current?.ready || current.saving) return false;
+    current.saving = true; current.message = 'Saving…'; renderNote();
+    try {
+      const revision = overwrite && current.conflict ? current.remote.revision : current.revision;
+      const result = await request('saveNote', { ticker, text: current.text, revision });
+      if (noteState !== current) return false;
+      if (result.conflict) {
+        current.conflict = true; current.remote = result.note; current.message = 'This note changed in another window. Reload it or explicitly overwrite it.'; return false;
+      }
+      current.saved = current.text; current.revision = result.note.revision; current.conflict = false; current.message = 'Saved locally'; return true;
+    } catch (error) { current.message = error.message; return false; }
+    finally { current.saving = false; if (noteState === current) renderNote(); }
+  }
+  async function mayLeave() {
+    if (!noteDirty()) return !noteState?.saving;
+    if (leavePending) return false;
+    const prompt = modal.querySelector('.tv-note-prompt'); prompt.hidden = false;
+    modal.querySelector('.tv-note').open = true;
+    prompt.querySelector('button').focus();
+    return new Promise(resolve => { leavePending = resolve; });
+  }
+  async function close(after) {
+    if (!await mayLeave()) return;
+    closeNow(); if (typeof after === 'function') after();
+  }
+  async function openTicker(input, target, keyboard = false, canonical = false, source = input) {
+    let ticker;
+    try { ticker = canonical ? TickerView.normalizeSymbol(input) : TickerView.resolveSymbol(input); } catch { return; }
+    if (!await mayLeave()) return;
+    clearTimeout(hoverTimer); clearTimeout(hideTimer);
+    pinned = false; anchor = target; chartIdentity = null;
+    void load(ticker, true, source);
+    position(); pinned = keyboard || popup;
+    const button = modal.querySelector('[data-action="pin"]');
+    button.textContent = pinned ? 'Unpin' : 'Pin'; button.setAttribute('aria-pressed', String(pinned));
+    if (popup) {
+      modal.setAttribute('aria-modal', 'true');
+      for (const element of document.body.children) if (element !== modal && !inertElements.has(element)) { inertElements.set(element, element.inert); element.inert = true; }
+    }
+    if (keyboard || popup) modal.querySelector('[data-action="close"]').focus();
+  }
+  modal.addEventListener('input', event => {
+    if (!event.target.matches('.tv-note textarea') || !noteState) return;
+    noteState.text = event.target.value; noteState.message = ''; pinned = true;
+    const pin = modal.querySelector('[data-action="pin"]'); pin.textContent = 'Unpin'; pin.setAttribute('aria-pressed', 'true'); renderNote();
+  });
+  modal.addEventListener('click', async event => {
+    const action = event.target.closest('button')?.dataset.action;
+    if (action === 'note-save' || action === 'note-overwrite') { await saveNote(action === 'note-overwrite'); return; }
+    if (action === 'note-reload' && noteState?.remote) {
+      const remote = noteState.remote;
+      Object.assign(noteState, { text: remote.text, saved: remote.text, revision: remote.revision, conflict: false, message: 'Reloaded saved note' }); renderNote(); return;
+    }
+    if (!['note-leave-save', 'note-discard', 'note-cancel'].includes(action) || !leavePending) return;
+    if (action === 'note-leave-save' && !await saveNote()) {
+      const resolve = leavePending; leavePending = null; modal.querySelector('.tv-note-prompt').hidden = true; modal.querySelector(noteState.conflict ? '[data-action="note-reload"]' : '.tv-note textarea').focus(); resolve(false); return;
+    }
+    const resolve = leavePending; leavePending = null; modal.querySelector('.tv-note-prompt').hidden = true;
+    if (action === 'note-discard') { noteState.text = noteState.saved; renderNote(); }
+    if (action === 'note-cancel') modal.querySelector('.tv-note textarea').focus();
+    resolve(action !== 'note-cancel');
+  });
+  if (popup) document.addEventListener('tickerview:close', event => void close(event.detail?.after));
+  window.addEventListener('beforeunload', event => { if (noteDirty()) { event.preventDefault(); event.returnValue = ''; } });
   function hideLater(delay = 300) {
     clearTimeout(hoverTimer); clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { if (!pinned && !modal.matches(':hover') && !modal.contains(document.activeElement)) close(); }, delay);
+    hideTimer = setTimeout(() => { if (!noteDirty() && !pinned && !modal.matches(':hover') && !modal.contains(document.activeElement)) close(); }, delay);
   }
   function scheduleRefresh() {
     clearTimeout(refreshTimer);
     if (!modal.hidden && !document.hidden) refreshTimer = setTimeout(() => { if (state) void load(state.ticker, false); }, 60000);
   }
-  async function load(ticker, fresh = true) {
+  async function load(ticker, fresh = true, source = ticker) {
     const id = ++generation;
     if (fresh) {
       chartGeneration++;
-      state = { ticker, quote: {}, range: '1D', chart: null, loading: new Set(['base', 'technicals', 'details']), errors: {}, statuses: {}, issues: [] };
+      noteState = { text: '', saved: '', revision: null, ready: false, saving: false };
+      state = { ticker, source, quote: {}, range: '1D', chart: null, loading: new Set(['base', 'technicals', 'details']), errors: {}, statuses: {}, issues: [] };
       modal.hidden = false; shell();
+      void readNote(ticker);
       void request('recent', { ticker }).catch(() => {});
     } else { state.loading = new Set(['base', 'technicals', 'details']); state.errors = {}; }
     const same = () => id === generation && state?.ticker === ticker && !modal.hidden;
@@ -286,6 +376,10 @@
       <div class="tv-summary" aria-live="polite"></div><div class="tv-freshness"></div>
       <div class="tv-timeframes" role="group" aria-label="Chart timeframe">${['1D', '5D', '1M', '6M', '1Y'].map(range => `<button type="button" data-range="${range}" aria-pressed="${range === '1D'}">${range}</button>`).join('')}</div>
       <div class="tv-chart" tabindex="0" role="group" aria-label="Price chart. Use left and right arrow keys to inspect points."></div><div class="tv-chart-readout" aria-live="polite">Loading chart…</div>
+      <details class="tv-note"><summary>Personal note</summary><label for="tv-note-text">Your note for this ticker</label><textarea id="tv-note-text" maxlength="4000" rows="4" disabled></textarea>
+      <button type="button" data-action="note-save" disabled>Save note</button><p class="tv-note-status" role="status">Loading note…</p>
+      <div class="tv-note-conflict" hidden><button type="button" data-action="note-reload">Reload saved note</button><button type="button" data-action="note-overwrite">Overwrite saved note</button></div>
+      <div class="tv-note-prompt" role="group" aria-label="Unsaved note" hidden><p>Save your note before leaving?</p><button type="button" data-action="note-leave-save">Save and continue</button><button type="button" data-action="note-discard">Discard</button><button type="button" data-action="note-cancel">Cancel</button></div></details>
       <div class="tv-stats-grid"></div>
       <details class="tv-valuation" open><summary>Value estimate</summary><div class="tv-valuation-output"></div>
       <details class="tv-assumptions"><summary>Edit P/E assumptions</summary><form class="tv-valuation-form" novalidate>
@@ -306,6 +400,7 @@
     const color = change == null ? '' : change >= 0 ? 'tv-positive' : 'tv-negative';
     const changeText = q.regularMarketChange != null && change != null ? `${number(q.regularMarketChange)} (${number(change, '%')})` : change != null ? number(change, '%') : q.regularMarketChange != null ? number(q.regularMarketChange) : 'Change unavailable';
     modal.querySelector('.tv-summary').innerHTML = `<div><strong class="tv-symbol">$${escape(q.symbol || state.ticker)}</strong><div class="tv-fullname">${escape(q.longName || '')}</div><div class="tv-company-context">${escape(q.sector || '')}${q.industry ? ` · ${escape(q.industry)}` : ''}</div></div><div class="tv-price-section"><strong class="tv-price">${q.regularMarketPrice == null ? state.loading.has('base') ? 'Loading…' : 'N/A' : money(q.regularMarketPrice)}</strong><div class="${color}">${changeText}</div></div>`;
+    if (state.source && TickerView.normalizeSymbol(state.source) !== state.ticker) { const resolved = document.createElement('div'); resolved.className = 'tv-company-context'; resolved.textContent = `Resolved from ${state.source}`; modal.querySelector('.tv-summary > div').append(resolved); }
     const quoteDate = q.quoteTime ? new Date(q.quoteTime * 1000).toLocaleString() : 'unavailable';
     const oldQuote = q.quoteTime && Date.now() / 1000 - q.quoteTime > 15 * 60;
     const quoteNote = state.statuses.base?.stale ? ' · STALE cache' : oldQuote ? q.marketState === 'regular' ? ' · STALE / last available' : ' · Last regular-session quote' : '';
@@ -327,7 +422,8 @@
       const formatted = ['marketCap', 'regularMarketVolume'].includes(key) ? compactNumber(value) : typeof value === 'string' ? escape(value) : number(value, percentages.has(key) ? key.startsWith('relStrength') ? ' pp' : '%' : key === 'rvol' ? '×' : '');
       return `<div class="tv-stat-item" data-indicator="${key}"><span class="tv-stat-label">${escape(key === 'relStrengthSector' && q.sectorEtf ? `RS vs ${q.sectorEtf}` : indicators[key])}</span><span class="tv-stat-value">${value == null && loading ? '…' : formatted}</span></div>`;
     }).join('');
-    const fundamentals = q.fundamentals || {};
+    const nonEquityInstrument = ['INDEX', 'CRYPTOCURRENCY', 'CURRENCY', 'FUTURE'].includes(q.instrumentType) || state.ticker.startsWith('^') || /-USD$/.test(state.ticker);
+    const fundamentals = nonEquityInstrument ? {} : q.fundamentals || {};
     const fundamentalFields = [
       ['trailingPE', 'P/E (TTM)', 'ratio'], ['forwardPE', 'Forward P/E', 'ratio'],
       ['priceToSales', 'Price / sales (TTM)', 'ratio'], ['priceToBook', 'Price / book', 'ratio'],
@@ -343,7 +439,7 @@
       const currency = format === 'cash' ? fundamentals.currency : fundamentals.quoteCurrency || q.currency;
       const formatted = format === 'percent' ? number(value * 100, '%') : format === 'cash' ? compactNumber(value) : number(value, format === 'ratio' ? '×' : '');
       return `<div class="tv-stat-item" data-fundamental="${key}"><span class="tv-stat-label">${label}</span><span class="tv-stat-value">${['cash', 'eps'].includes(format) ? `${escape(currency || 'Currency unreported')} ` : ''}${formatted}</span></div>`;
-    }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`;
+    }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : nonEquityInstrument ? 'Company fundamentals do not apply to this instrument.' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`;
     renderValuation(q);
     let extras = '';
     if (q.earningsTimestamp) {
@@ -369,7 +465,8 @@
     }).join('') || '<p>No matching headlines available.</p>'}` : '<p>News unavailable.</p>';
     modal.querySelector('.tv-messages').textContent = [...Object.values(state.errors), ...state.issues, ...Object.entries(state.statuses).filter(([, v]) => v.stale).map(([name]) => `${name}: cached data; refresh failed`), state.loading.size ? `Loading ${[...state.loading].join(', ')}…` : ''].filter(Boolean).join(' · ');
     const symbol = encodeURIComponent(q.symbol || state.ticker);
-    modal.querySelector('.tv-research-dock').innerHTML = [['TradingView', `https://www.tradingview.com/chart/?symbol=${symbol}`], ['Finviz', `https://finviz.com/quote.ashx?t=${symbol}`], ['Insider', `https://openinsider.com/search?q=${symbol}`]].map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`).join('');
+    const nonEquity = q.instrumentType && !['EQUITY', 'ETF'].includes(q.instrumentType) || state.ticker.startsWith('^') || /-USD$/.test(state.ticker);
+    modal.querySelector('.tv-research-dock').innerHTML = [['Yahoo Finance', `https://finance.yahoo.com/quote/${symbol}/`], ...(!nonEquity ? [['TradingView', `https://www.tradingview.com/chart/?symbol=${symbol}`], ['Finviz', `https://finviz.com/quote.ashx?t=${symbol}`], ['Insider', `https://openinsider.com/search?q=${symbol}`]] : [])].map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`).join('');
     drawChart(); position();
   }
   let chartIndex = 0, chartIdentity;
@@ -445,7 +542,7 @@
     const target = event.target.closest?.('.tickerview-highlight');
     if (!active || !target || pinned || target.contains(event.relatedTarget)) return;
     clearTimeout(hideTimer); clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => { anchor = target; chartIdentity = null; void load(target.dataset.ticker); }, settings.hoverDelay);
+    hoverTimer = setTimeout(() => { void openTicker(target.dataset.ticker, target); }, settings.hoverDelay);
   });
   document.addEventListener('mouseout', event => { const target = event.target.closest?.('.tickerview-highlight'); if (target && !target.contains(event.relatedTarget)) hideLater(400); });
   document.addEventListener('keydown', event => {
@@ -453,12 +550,7 @@
     const target = event.target.closest?.('.tickerview-highlight');
     if (active && target && ['Enter', ' '].includes(event.key)) {
       event.preventDefault(); clearTimeout(hoverTimer); clearTimeout(hideTimer);
-      pinned = true; anchor = target; chartIdentity = null;
-      void load(target.dataset.ticker);
-      const pin = modal.querySelector('[data-action="pin"]'); pin.textContent = 'Unpin'; pin.setAttribute('aria-pressed', 'true');
-      // Position once before keeping the keyboard-opened card pinned.
-      pinned = false; position(); pinned = true;
-      modal.querySelector('button').focus();
+      void openTicker(target.dataset.ticker, target, true);
     }
   });
   window.addEventListener('scroll', event => { if (!modal.hidden && !pinned && !modal.contains(event.target)) close(); }, { passive: true, capture: true });
@@ -470,32 +562,32 @@
     if (!document.hidden && state) void load(state.ticker, false);
   });
   if (popup) document.addEventListener('tickerview:open', event => {
-    try {
-      const ticker = TickerView.normalizeSymbol(event.detail.ticker);
-      clearTimeout(hoverTimer); clearTimeout(hideTimer);
-      pinned = false; anchor = event.detail.anchor; chartIdentity = null;
-      void load(ticker);
-      position(); pinned = true;
-      const button = modal.querySelector('[data-action="pin"]'); button.textContent = 'Unpin'; button.setAttribute('aria-pressed', 'true');
-      modal.setAttribute('aria-modal', 'true');
-      for (const element of document.body.children) if (element !== modal && !inertElements.has(element)) { inertElements.set(element, element.inert); element.inert = true; }
-      modal.querySelector('[data-action="close"]').focus();
-    } catch { /* Popup validates symbols before sending the event. */ }
+    void openTicker(event.detail.ticker, event.detail.anchor, true, true, event.detail.source || event.detail.ticker);
   });
   modal.addEventListener('keydown', event => {
     if (!popup || event.key !== 'Tab') return;
-    const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
+    const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.customAliases) TickerView.setAliases(changes.customAliases.newValue);
+    if (changes.tickerNotes && state && noteState?.ready && !noteState.saving) {
+      const remote = changes.tickerNotes.newValue?.[state.ticker] || { text: '', revision: null };
+      if (remote.revision !== noteState.revision) {
+        if (noteDirty()) { noteState.conflict = true; noteState.remote = remote; noteState.message = 'This note changed in another window. Your draft is preserved.'; }
+        else Object.assign(noteState, { text: remote.text, saved: remote.text, revision: remote.revision, conflict: false, message: '' });
+        renderNote();
+      }
+    }
     if (changes.valuationScenarios) { valuationScenarios = changes.valuationScenarios.newValue || {}; if (state) renderValuation(state.quote); }
     if (changes.settings) { settings = TickerView.settings(changes.settings.newValue); applySettings(); }
     if (changes.watchlist) { watchlist = changes.watchlist.newValue || []; if (state) render(); }
   });
-  chrome.storage.local.get(['settings', 'watchlist', 'valuationScenarios']).then(values => {
+  chrome.storage.local.get(['settings', 'watchlist', 'valuationScenarios', 'customAliases']).then(values => {
+    TickerView.setAliases(values.customAliases);
     valuationScenarios = values.valuationScenarios || {};
     settings = TickerView.settings(values.settings); watchlist = values.watchlist || []; applySettings();
   }).catch(() => applySettings());

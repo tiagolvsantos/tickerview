@@ -14,8 +14,9 @@ await context.addInitScript(() => {
   const listeners = [];
   const values = {
     settings: { enabled: true, hoverDelay: 150, compact: true, reducedEffects: false, disabledSites: [], indicators: ['marketCap', 'regularMarketVolume', 'rvol', 'relStrength', 'rsi', 'atr', 'vwap', 'keyLevelStatus'] },
+    marketOverview: Object.fromEntries([['SPY', 659.12, .48], ['QQQ', 613.55, .72], ['^VIX', 18.24, -1.35], ['BTC-USD', 81296.35, -.02]].map(([symbol, price, changePercent]) => [symbol, { symbol, price, changePercent, currency: 'USD', fetchedAt: now, quoteTime: now / 1000 }])),
     watchlist: ['NVDA', 'AAPL'], recent: ['AMD', 'TSLA', 'VOD.L'],
-    quoteSnapshots: { NVDA: { name: 'NVIDIA Corporation', price: 186.42, changePercent: 2.65, currency: 'USD', quoteTime: now / 1000 }, AAPL: { name: 'Apple Inc.', price: 245.38, changePercent: -.84, currency: 'USD', quoteTime: now / 1000 } }
+    quoteSnapshots: { NVDA: { name: 'NVIDIA Corporation', price: 186.42, change: 4.81, fetchedAt: now, changePercent: 2.65, currency: 'USD', quoteTime: now / 1000 }, AAPL: { name: 'Apple Inc.', price: 245.38, change: -2.08, fetchedAt: now, changePercent: -.84, currency: 'USD', quoteTime: now / 1000 } }
   };
   const prices = [181.7, 182.1, 181.8, 182.7, 182.4, 183.2, 182.9, 183.6, 183.3, 183.8, 184.4, 183.9, 184.6, 184.2, 185, 184.8, 185.6, 185.2, 185.8, 185.5, 186.1, 185.7, 186.2, 186.42];
   const points = prices.map((close, i) => ({ time: now / 1000 - (prices.length - i - 1) * 300, close, volume: 260000 + (i * 97123) % 700000 }));
@@ -36,6 +37,7 @@ await context.addInitScript(() => {
       getURL: path => `https://x.com/${path}`,
       getManifest: () => ({ content_scripts: [{ matches: ['https://*.x.com/*'] }] }),
       sendMessage: async request => {
+        if (['overview', 'refreshDashboard'].includes(request.action)) return { success: true, marketOverview: values.marketOverview, outcomes: Object.fromEntries([...new Set([...TickerView.overviewSymbols, ...values.watchlist])].map(symbol => [symbol, { stale: false }])) };
         if (request.action === 'library') return { success: true, watchlist: values.watchlist, recent: values.recent, snapshots: values.quoteSnapshots };
         if (request.action === 'recent') return { success: true };
         if (request.action === 'base') return {
@@ -142,12 +144,12 @@ try {
     await page.goto(`https://x.com/showcase-${type}`);
     if (['settings', 'controls'].includes(type)) {
       const frame = page.frameLocator('.popup-frame');
-      await frame.locator('#settings:not([disabled])').waitFor();
+      await frame.locator('#settings:not([disabled])').waitFor({ state: 'attached' });
       await frame.locator('#watchlist .watch-row').last().waitFor();
       if (type === 'controls') {
-        await frame.locator('.settings-panel').first().locator('summary').click();
-        await frame.locator('#indicator-options > summary').click();
-        await frame.locator('#settings').evaluate(node => window.scrollTo(0, node.offsetTop - 14));
+        await frame.locator('#open-settings').click();
+        await frame.getByRole('tab', { name: 'Cards', exact: true }).click();
+        await frame.locator('.settings-dialog-body').evaluate(node => { node.scrollTop = 0; });
       }
       await page.evaluate(async () => { await document.fonts.ready; await document.querySelector('iframe').contentDocument.fonts.ready; });
       if (!await frame.locator('.brand-logo').evaluate(image => image.complete && image.naturalWidth > 0)) throw Error('Popup logo did not load');

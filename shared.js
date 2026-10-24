@@ -15,6 +15,46 @@ globalThis.TickerView = (() => {
     if (!/^(?:[A-Z^][A-Z0-9.^=-]{0,19}|\d{1,10}\.[A-Z]{1,4})$/.test(value)) throw new Error('Enter a stock symbol, not a currency amount');
     return value.replace(/^([A-Z]+)\.([AB])$/, '$1-$2');
   }
+  const builtinAliases = Object.freeze({ VIX: '^VIX', SPX: '^GSPC', SP500: '^GSPC', DJI: '^DJI', IXIC: '^IXIC', RUT: '^RUT', BTC: 'BTC-USD', BTCUSD: 'BTC-USD', ETH: 'ETH-USD', ETHUSD: 'ETH-USD' });
+  let customAliases = {};
+  function aliasKey(value) {
+    const key = typeof value === 'string' ? value.trim().replace(/^\$/, '').toUpperCase() : '';
+    if (!/^[A-Z][A-Z0-9]{0,19}$/.test(key)) throw new Error('Alias must contain letters/numbers and start with a letter.');
+    return normalizeSymbol(key);
+  }
+  function setAliases(value = {}) {
+    customAliases = {};
+    for (const [key, target] of Object.entries(value || {}).slice(0, 100)) {
+      try { if (aliasKey(key) === key) customAliases[key] = normalizeSymbol(target); } catch { /* Ignore invalid stored mappings. */ }
+    }
+  }
+  function resolveSymbol(input, aliases = { ...builtinAliases, ...customAliases }) {
+    const symbol = normalizeSymbol(input);
+    return Object.hasOwn(aliases, symbol) ? normalizeSymbol(aliases[symbol]) : symbol;
+  }
+  const sortModes = ['saved', 'symbol', 'symbol-desc', 'company', 'price-desc', 'price-asc', 'change-desc', 'change-asc'];
+  function sortSymbols(symbols, snapshots, mode) {
+    if (mode === 'saved' || !sortModes.includes(mode)) return [...symbols];
+    return [...symbols].sort((a, b) => {
+      const av = mode.startsWith('symbol') ? a : mode === 'company' ? snapshots[a]?.name : mode.startsWith('price') ? snapshots[a]?.price : snapshots[a]?.changePercent;
+      const bv = mode.startsWith('symbol') ? b : mode === 'company' ? snapshots[b]?.name : mode.startsWith('price') ? snapshots[b]?.price : snapshots[b]?.changePercent;
+      const numeric = mode.startsWith('change') || mode.startsWith('price');
+      const valid = v => numeric ? Number.isFinite(v) : typeof v === 'string' && !!v;
+      if (valid(av) !== valid(bv)) return valid(av) ? -1 : 1;
+      const result = !valid(av) ? 0 : numeric ? (av - bv) * (mode.endsWith('-desc') ? -1 : 1) : av.localeCompare(bv) * (mode === 'symbol-desc' ? -1 : 1);
+      return result || a.localeCompare(b);
+    });
+  }
+  const overviewSymbols = Object.freeze(['SPY', 'QQQ', '^VIX', 'BTC-USD']);
+  function dashboardPreferences(value = {}) {
+    return { autoRefresh: value?.autoRefresh !== false, refreshInterval: [15, 30, 60, 120, 300].includes(value?.refreshInterval) ? value.refreshInterval : 15, windowMode: ['remember', 'fit', 'full'].includes(value?.windowMode) ? value.windowMode : 'remember' };
+  }
+  function windowBounds(value) {
+    if (!value || !['width', 'height'].every(key => Number.isFinite(value[key]))) return null;
+    const bounds = { width: Math.round(Math.max(320, Math.min(10000, value.width))), height: Math.round(Math.max(300, Math.min(10000, value.height))) };
+    for (const key of ['left', 'top']) if (Number.isFinite(value[key])) bounds[key] = Math.round(Math.max(-100000, Math.min(100000, value[key])));
+    return bounds;
+  }
   function cleanSymbols(values, limit = 100) {
     const symbols = [];
     for (const input of Array.isArray(values) ? values : []) {
@@ -66,5 +106,5 @@ globalThis.TickerView = (() => {
       .filter(([, value]) => positive(value)).map(([label, value]) => ({ label, value, difference: difference(value) })) : [];
     return { reason, scenarios, targets };
   }
-  return { valuationDefaults, valuationAssumptions, valuation, indicators, groups, presets, normalizeSymbol, cleanSymbols, defaults, settings: value => settings({ ...defaults, ...value }) };
+  return { overviewSymbols, dashboardPreferences, windowBounds, builtinAliases, aliasKey, setAliases, resolveSymbol, sortModes, sortSymbols, valuationDefaults, valuationAssumptions, valuation, indicators, groups, presets, normalizeSymbol, cleanSymbols, defaults, settings: value => settings({ ...defaults, ...value }) };
 })();

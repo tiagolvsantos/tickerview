@@ -2,32 +2,88 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TickerView settings</title><link rel="stylesheet" href="brand.css"><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="styles.css">
+  <title>TickerView</title><link rel="stylesheet" href="brand.css"><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="styles.css">
   <script src="shared.js" defer></script><script src="content.js" defer></script><script src="popup.js" defer></script>
 </head>
 <body class="tv-theme tv-popup">
-  <header><img class="brand-logo" src="icons/icon128.png" alt="Cerberus logo" width="40" height="40"><div class="brand-copy"><span class="brand-eyebrow">CERBERUS</span><h1>TickerView</h1></div><div class="header-actions"><span class="version">2.0.0</span><button type="button" id="expand-popup" title="Open in a taller, resizable window" aria-label="Expand TickerView into a resizable window">Expand ↗</button></div></header>
-  <p id="status" role="status">Loading settings…</p>
+  <header><img class="brand-logo" src="icons/icon128.png" alt="Cerberus logo" width="40" height="40"><div class="brand-copy"><span class="brand-eyebrow">CERBERUS</span><h1>TickerView</h1></div><div class="header-actions"><span class="version">2.1.0</span><div class="header-buttons"><button type="button" id="open-settings" class="settings-gear" title="Settings" aria-label="Open settings" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m9.5 3-.6 2.2-1.7 1L5 5.6 2.5 9.9l1.6 1.6v2L2.5 15 5 19.4l2.2-.6 1.7 1 .6 2.2h5l.6-2.2 1.7-1 2.2.6 2.5-4.3-1.6-1.6v-2l1.6-1.6L19 5.6l-2.2.6-1.7-1L14.5 3z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12.5" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button><button type="button" id="fit-window" title="Fit window to content" aria-label="Fit window to content" hidden>↕</button><button type="button" id="expand-popup" title="Open in a taller, resizable window" aria-label="Expand TickerView into a resizable window">Expand ↗</button></div></div></header>
+  <form id="ticker-search"><label for="search-symbol" class="sr-only">Open ticker or alias</label><div class="row"><input id="search-symbol" maxlength="20" placeholder="Open ticker or alias, e.g. BTC" required autocomplete="off" spellcheck="false" aria-describedby="search-feedback"><button type="submit">Open</button></div><p id="search-feedback" role="status"></p></form>
+  <nav id="market-overview" aria-label="Market overview"></nav>
+  <div class="market-freshness"><span id="dashboard-freshness" title="Oldest source retrieval among displayed quotes. Quote timestamps may be older or delayed.">Loading market overview…</span><button type="button" id="refresh-countdown" aria-label="Configure automatic refresh" aria-haspopup="dialog" title="Configure automatic refresh"></button></div>
+  <section><div class="section-heading watch-heading"><h2>Watchlist <span id="watch-count" class="count"></span></h2><div class="watch-tools"><button type="button" id="refresh-watchlist" class="refresh-button" aria-label="Refresh market quotes" title="Refresh quotes now"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.1 8a7.5 7.5 0 0 1 12.4-2.5L20 8M4 16l2.5 2.5A7.5 7.5 0 0 0 18.9 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div><p id="refresh-feedback" role="status"></p>
+    <form id="add-symbol"><label for="symbol" class="sr-only">Add a stock symbol</label><div class="row"><input id="symbol" maxlength="20" placeholder="Add a symbol, e.g. AAPL" required autocomplete="off" spellcheck="false" aria-describedby="symbol-feedback"><button type="submit">Add</button></div><p id="symbol-feedback" role="status"></p></form>
+    <div id="watchlist" class="watchlist"></div><p id="cache-note">Prices are cached snapshots. Use Refresh or open a card to update.</p>
+  </section>
+  <section><div class="section-heading"><h2>Recent tickers</h2><button type="button" id="clear-recent" class="text-button">Clear history</button></div><div id="recent" class="symbols"></div></section>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="settings-dialog-heading"><h2 id="settings-title">Settings</h2><button type="button" id="close-settings" aria-label="Close settings">×</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+      <button type="button" role="tab" id="settings-tab-market" data-settings-tab="market" aria-controls="settings-panel-market" aria-selected="true" tabindex="0">Market</button>
+      <button type="button" role="tab" id="settings-tab-cards" data-settings-tab="cards" aria-controls="settings-panel-cards" aria-selected="false" tabindex="-1">Cards</button>
+      <button type="button" role="tab" id="settings-tab-aliases" data-settings-tab="aliases" aria-controls="settings-panel-aliases" aria-selected="false" tabindex="-1">Aliases</button>
+      <button type="button" role="tab" id="settings-tab-backup" data-settings-tab="backup" aria-controls="settings-panel-backup" aria-selected="false" tabindex="-1">Backup</button>
+    </div>
+    <div class="settings-dialog-body">
+      <section id="settings-panel-market" role="tabpanel" aria-labelledby="settings-tab-market">
+        <h3>Market &amp; refresh</h3><p class="settings-description">Control live updates, window size, and watchlist order.</p>
+        <div id="dashboard-options">
+          <fieldset class="settings-card refresh-settings"><legend>Automatic refresh <span id="auto-refresh-status" class="setting-badge">On</span></legend>
+            <label class="switch-row"><span>Auto-refresh<small>Update the overview and watchlist while this window is visible.</small></span><input type="checkbox" role="switch" id="auto-refresh" aria-label="Auto-refresh" aria-describedby="auto-refresh-summary"><span class="switch-track" aria-hidden="true"></span></label>
+            <label class="settings-field" for="refresh-interval">Refresh every <select id="refresh-interval"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option></select></label>
+            <p id="auto-refresh-summary" class="settings-hint" role="status"></p>
+          </fieldset>
+          <fieldset class="settings-card"><legend>Window size</legend>
+            <label class="settings-field" for="window-mode">Height mode <select id="window-mode"><option value="remember">Remember my size</option><option value="fit">Fit to content</option><option value="full">Full height</option></select></label>
+            <p class="settings-hint">Manual resizing is remembered for the next time you open TickerView.</p><button type="button" id="fit-window-settings">Fit window now</button>
+          </fieldset>
+          <fieldset class="settings-card"><legend>Watchlist order</legend>
+            <label class="settings-field" for="watch-sort">Sort by <select id="watch-sort"><option value="saved">Saved order</option><option value="symbol">Symbol A–Z</option><option value="symbol-desc">Symbol Z–A</option><option value="price-desc">Price ↓</option><option value="price-asc">Price ↑</option><option value="company">Company A–Z</option><option value="change-desc">Daily change ↓</option><option value="change-asc">Daily change ↑</option></select></label>
+            <p class="settings-hint">You can also click the column headers on the main screen.</p>
+          </fieldset>
+        </div>
+      </section>
+      <section id="settings-panel-cards" role="tabpanel" aria-labelledby="settings-tab-cards" hidden>
+        <h3>Cards &amp; websites</h3><p class="settings-description">Choose where hover cards appear and what they show.</p>
   <fieldset id="settings" disabled>
     <legend class="sr-only">TickerView settings</legend>
-    <fieldset class="control-panel"><legend>Extension controls</legend>
-      <label class="switch-row"><span>Enable TickerView<small>Detect cashtags on supported sites</small></span><input type="checkbox" role="switch" id="enabled"><span class="switch-track" aria-hidden="true"></span></label>
-      <label class="switch-row site-control"><span>Enabled on <span id="site">this site</span></span><input type="checkbox" role="switch" id="siteEnabled"><span class="switch-track" aria-hidden="true"></span></label>
+    <fieldset class="control-panel"><legend>Website highlighting</legend>
+      <label class="switch-row"><span>Highlight stock tickers<small>Open cards by hovering over cashtags on websites</small></span><input type="checkbox" role="switch" id="enabled"><span class="switch-track" aria-hidden="true"></span></label>
+      <label class="switch-row site-control"><span>Highlight on <span id="site">this site</span></span><input type="checkbox" role="switch" id="siteEnabled"><span class="switch-track" aria-hidden="true"></span></label>
     </fieldset>
-    <details class="settings-panel"><summary>Appearance <span id="appearance-summary">300 ms · Detailed</span></summary><div class="panel-body">
+    <p class="settings-hint">Website controls affect cashtag highlighting. Configure quote updates in Market.</p>
+    <details class="settings-panel" open><summary>Card appearance <span id="appearance-summary">300 ms · Detailed</span></summary><div class="panel-body">
       <label class="delay">Hover delay <select id="hoverDelay"><option value="0">Instant</option><option value="150">150 ms</option><option value="300">300 ms</option><option value="500">500 ms</option><option value="800">800 ms</option><option value="1500">1.5 seconds</option></select></label>
       <label><input type="checkbox" id="compact"> Compact card</label><label><input type="checkbox" id="reducedEffects"> Reduce visual effects</label>
     </div></details>
-    <details class="settings-panel" id="indicator-options"><summary>Visible indicators <span id="indicator-count"></span></summary><div class="panel-body">
+    <details class="settings-panel" id="indicator-options" open><summary>Visible indicators <span id="indicator-count"></span></summary><div class="panel-body">
       <div id="presets" role="group" aria-label="Indicator presets"><button type="button" data-preset="Essential">Essential</button><button type="button" data-preset="Technical">Technical</button><button type="button" data-preset="All">All</button></div>
       <div id="indicators"></div>
     </div></details>
   </fieldset>
-  <section><h2>Watchlist <span id="watch-count" class="count"></span></h2>
-    <form id="add-symbol"><label for="symbol" class="sr-only">Add a stock symbol</label><div class="row"><input id="symbol" maxlength="20" placeholder="Add a symbol, e.g. AAPL" required autocomplete="off" spellcheck="false" aria-describedby="symbol-feedback"><button type="submit">Add</button></div><p id="symbol-feedback" role="status"></p></form>
-    <div id="watchlist" class="watchlist"></div><p id="cache-note">Prices are last viewed snapshots. Open a card to refresh.</p>
-  </section>
-  <section><div class="section-heading"><h2>Recent tickers</h2><button type="button" id="clear-recent" class="text-button">Clear history</button></div><div id="recent" class="symbols"></div></section>
-  <footer><span class="footer-brand">CERBERUS</span><details id="keyboard-help"><summary>Keyboard help</summary><p><kbd>Enter</kbd> adds a symbol or opens its card. <kbd>Esc</kbd> closes a card. On a page, focus a cashtag and press <kbd>Enter</kbd> or <kbd>Space</kbd>.</p></details></footer>
+      </section>
+      <section id="settings-panel-aliases" role="tabpanel" aria-labelledby="settings-tab-aliases" hidden>
+        <h3>Ticker aliases</h3><div id="alias-settings">
+
+    <p>Use familiar names such as BTC or VIX. Add your own mapping or edit a built-in alias.</p>
+    <form id="alias-form"><label for="alias-key">Alias</label><input id="alias-key" maxlength="20" required placeholder="BTC"><label for="alias-target">Yahoo symbol</label><input id="alias-target" maxlength="20" required placeholder="BTC-USD"><button type="submit">Save alias</button></form>
+    <p id="alias-feedback" role="status"></p><div id="alias-list"></div><button type="button" id="reset-aliases">Reset custom mappings</button>        </div>
+      </section>
+      <section id="settings-panel-backup" role="tabpanel" aria-labelledby="settings-tab-backup" hidden>
+        <h3>Backup &amp; restore</h3><div id="backup-settings">
+
+    <p>Download your watchlist, preferences, aliases, notes, and valuation assumptions. Import a backup to restore them.</p>
+    <div class="settings-card"><h4>Export</h4><p>Save a portable JSON file to your computer.</p><button type="button" id="export-backup">Download backup</button><p id="export-feedback" role="status"></p></div>
+    <div class="settings-card"><h4>Import</h4>
+    <label for="import-file">Import backup (JSON, up to 2 MB)</label><input type="file" id="import-file" accept=".json,application/json">
+    <label for="import-mode">How to import <select id="import-mode"><option value="merge">Merge with current data</option><option value="replace">Replace current data</option></select></label>
+    <p id="import-explanation">Keep existing entries and add the backup. Matching entries and preferences use the backup’s values.</p>
+    <div id="import-preview" hidden><p id="import-summary"></p><button type="button" id="apply-import">Import backup</button><button type="button" id="cancel-import">Cancel</button></div>
+    <p id="backup-feedback" role="status"></p>
+    </div>        </div>
+      </section>
+    </div>
+    <div class="settings-dialog-footer"><p id="status" role="status">Loading settings…</p></div>
+  </dialog>
+  <footer><span class="footer-brand">CERBERUS</span><details id="keyboard-help"><summary>Keyboard help</summary><p><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> opens search (customize in chrome://extensions/shortcuts). <kbd>Enter</kbd> adds a symbol or opens its card. <kbd>Esc</kbd> closes a card. On a page, focus a cashtag and press <kbd>Enter</kbd> or <kbd>Space</kbd>.</p></details></footer>
 </body>
 </html>
