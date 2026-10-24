@@ -242,6 +242,64 @@ test('late quote responses cannot overwrite another ticker or reopen a closed ca
   await expect(page.locator('#tickerview-modal')).toBeHidden();
 });
 
+test('TweetDeck hover switches from QQQ to META when the host intercepts mouse events', async ({ page }) => {
+  await mockChrome(page, { url: 'https://x.com/i/tweetdeck' });
+  await page.evaluate(() => {
+    const column = document.createElement('section');
+    column.innerHTML = '<a id="qqq" href="#"><span>$</span><span>QQQ</span></a> <a id="meta" href="#"><span>$</span><span>META</span></a>';
+    for (const type of ['mouseover', 'mouseout']) column.addEventListener(type, event => event.stopPropagation());
+    document.body.append(column);
+  });
+  await expect(page.locator('#meta')).toHaveAttribute('data-ticker', 'META');
+  await page.locator('#qqq span').last().dispatchEvent('mouseover');
+  await expect(page.locator('.tv-symbol')).toHaveText('$QQQ');
+  await page.locator('#meta span').last().dispatchEvent('mouseover');
+  await expect(page.locator('.tv-symbol')).toHaveText('$META');
+  await expect.poll(() => page.evaluate(() => window.testCalls.filter(call => call.action === 'base').at(-1)?.ticker)).toBe('META');
+});
+
+test('extension reload cannot leave the previous ticker or an empty card visible', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mockChrome(page);
+  await expect(page.locator('.tickerview-highlight')).toHaveCount(2);
+  await page.locator('#one .tickerview-highlight').dispatchEvent('mouseover');
+  await expect(page.locator('.tv-price')).toHaveText('USD 114');
+  await page.evaluate(() => {
+    chrome.runtime.getURL = () => { throw new Error('Extension context invalidated.'); };
+    chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
+    document.querySelector('#two .tickerview-highlight').textContent = '$SOXX';
+  });
+  await page.locator('#two .tickerview-highlight').dispatchEvent('mouseover');
+  await expect(page.locator('.tv-symbol')).toHaveText('$SOXX');
+  await expect(page.locator('.tv-messages')).toContainText('Extension updated. Refresh this page.');
+  await expect(page.locator('.tv-price')).toHaveText('N/A');
+  await page.locator('[data-action="close"]').click();
+  await expect(page.locator('#tickerview-modal')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('card renders on host pages enforcing Trusted Types', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await mockChrome(page);
+  await expect(page.locator('.tickerview-highlight')).toHaveCount(2);
+  await page.evaluate(() => {
+    const meta = document.createElement('meta');
+    meta.httpEquiv = 'Content-Security-Policy';
+    meta.content = "require-trusted-types-for 'script'";
+    document.head.append(meta);
+  });
+  await page.locator('#one .tickerview-highlight').hover();
+  await expect(page.locator('.tv-symbol')).toHaveText('$AAPL');
+  await expect(page.locator('.tv-fullname')).toHaveText('AAPL Company');
+  await expect(page.locator('.tv-chart svg')).toBeVisible();
+  await expect(page.locator('.tv-news-body')).toContainText('Company surge');
+  const bounds = await page.locator('#tickerview-modal').boundingBox();
+  expect(bounds.height).toBeGreaterThan(200);
+  expect(errors).toEqual([]);
+});
+
 test('cash amounts remain plain text while stock cashtags still work', async ({ page }) => {
   await mockChrome(page);
   const money = 'Toto Wolff says Mercedes F1 make $1B a year. Mercedes F1 valued at ~$5B (no NFL team under $5B...18 NBA teams over $5B). Also $5.8B, $2.5M, $10k, $12bn, $100, and $1,200.50.';

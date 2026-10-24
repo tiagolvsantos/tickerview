@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2026-10-24
+
+### Fixed
+
+- Cache the logo URL at startup so extension reloads cannot interrupt card replacement and leave a previous ticker or empty border visible; disconnected cards show a page-refresh message.
+- Render stock cards through a scoped Trusted Types policy so enforcing host pages do not leave an empty card border.
+- Capture ticker hover events before host handlers intercept them and read the current cashtag text when opening a card.
+
+### Added
+
+- Project-specific `AGENTS.md` covering extension architecture, behavior, privacy, validation, and Conventional Commits.
+
 ## [2.1.0] - 2026-10-23
 
 Minor release adding market overview, configurable refresh, portable backups, ticker aliases, personal notes, and clearer settings.

@@ -3,6 +3,8 @@
   const popup = document.body.classList.contains('tv-popup');
   const inertElements = new Map();
   const linkAttributes = new WeakMap();
+  // Resolve bundled assets while this content script still has a valid runtime.
+  const logoURL = chrome.runtime.getURL('icons/icon128.png');
   // Local branded typefaces, registered only in the current document. Their unique
   // family names avoid replacing the host site's fonts; Chrome loads them on use.
   for (const [family, path, weight] of popup ? [] : [
@@ -29,6 +31,10 @@
   const number = (value, suffix = '', digits = 2) => typeof value === 'number' && Number.isFinite(value) ? `${value.toLocaleString(undefined, { maximumFractionDigits: digits })}${suffix}` : 'N/A';
   const compactNumber = value => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).format(value) : 'N/A';
   const safeURL = value => { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? escape(u.href) : ''; } catch { return ''; } };
+  // Some host pages enforce Trusted Types even for extension DOM sinks.
+  // Only pass extension templates with escaped provider/user text to this policy.
+  const htmlPolicy = globalThis.trustedTypes?.createPolicy('tickerview-card', { createHTML: html => html });
+  const setHTML = (element, html) => { element.innerHTML = htmlPolicy ? htmlPolicy.createHTML(html) : html; };
   const request = async (action, extra = {}) => {
     try {
       const result = await chrome.runtime.sendMessage({ action, ...extra });
@@ -340,7 +346,7 @@
     html += '</div>';
     if (state.sources?.profile) html += `<p class="tv-valuation-note">Fundamentals: ${escape(new Date(state.sources.profile.fetchedAt).toLocaleString())}${state.sources.profile.stale ? ' · STALE cache' : ''}</p>`;
     if (state.statuses.base?.stale || q.quoteTime && Date.now() / 1000 - q.quoteTime > 900) html += '<p class="tv-valuation-note">Quote is cached or more than 15 minutes old; comparisons use the displayed quote.</p>';
-    modal.querySelector('.tv-valuation-output').innerHTML = html;
+    setHTML(modal.querySelector('.tv-valuation-output'), html);
   }
   async function saveValuation(reset = false) {
     const current = state, form = modal.querySelector('.tv-valuation-form');
@@ -369,9 +375,9 @@
     event.preventDefault(); void saveValuation();
   });
   function shell() {
-    modal.innerHTML = `
+    setHTML(modal, `
       <div class="tv-chrome">
-      <div class="tv-brand"><img src="${escape(chrome.runtime.getURL('icons/icon128.png'))}" alt="Cerberus logo" width="32" height="32"><div class="tv-brand-copy"><span class="tv-brand-name">CERBERUS</span><span class="tv-brand-product">TickerView</span></div><span class="tv-brand-tag">MARKET INTELLIGENCE</span></div>
+      <div class="tv-brand"><img src="${escape(logoURL)}" alt="Cerberus logo" width="32" height="32"><div class="tv-brand-copy"><span class="tv-brand-name">CERBERUS</span><span class="tv-brand-product">TickerView</span></div><span class="tv-brand-tag">MARKET INTELLIGENCE</span></div>
       <div class="tv-toolbar"><button type="button" data-action="pin" aria-pressed="false">Pin</button><button type="button" data-action="watch">Save</button><button type="button" data-action="refresh">Refresh</button><button type="button" data-action="close" aria-label="Close stock information">×</button></div></div>
       <div class="tv-summary" aria-live="polite"></div><div class="tv-freshness"></div>
       <div class="tv-timeframes" role="group" aria-label="Chart timeframe">${['1D', '5D', '1M', '6M', '1Y'].map(range => `<button type="button" data-range="${range}" aria-pressed="${range === '1D'}">${range}</button>`).join('')}</div>
@@ -388,7 +394,7 @@
       <details class="tv-fundamentals" open><summary>Fundamentals</summary><div class="tv-fundamentals-body"></div></details><div class="tv-extras"></div>
       <details class="tv-news"><summary>News and sentiment</summary><div class="tv-news-body"></div></details>
       <details class="tv-guide"><summary>Indicator guide</summary><p>RS compares session returns in percentage points, only for matching market dates. Volume / avg day compares current session volume with the prior 50 full sessions; it is not time-of-day RVOL. ATR uses Wilder smoothing. VWAP is a close × volume estimate from five-minute regular-session bars. Daily indicators combine cached history with the current intraday session when available. History and profile retrieval times appear on the card. Sentiment uses headline keywords, ignores articles older than 48 hours, and fades toward neutral with age.</p></details>
-      <div class="tv-messages" role="status"></div><nav class="tv-research-dock" aria-label="Research links"></nav>`;
+      <div class="tv-messages" role="status"></div><nav class="tv-research-dock" aria-label="Research links"></nav>`);
     render();
   }
   function render() {
@@ -399,7 +405,7 @@
     const change = q.regularMarketChangePercent;
     const color = change == null ? '' : change >= 0 ? 'tv-positive' : 'tv-negative';
     const changeText = q.regularMarketChange != null && change != null ? `${number(q.regularMarketChange)} (${number(change, '%')})` : change != null ? number(change, '%') : q.regularMarketChange != null ? number(q.regularMarketChange) : 'Change unavailable';
-    modal.querySelector('.tv-summary').innerHTML = `<div><strong class="tv-symbol">$${escape(q.symbol || state.ticker)}</strong><div class="tv-fullname">${escape(q.longName || '')}</div><div class="tv-company-context">${escape(q.sector || '')}${q.industry ? ` · ${escape(q.industry)}` : ''}</div></div><div class="tv-price-section"><strong class="tv-price">${q.regularMarketPrice == null ? state.loading.has('base') ? 'Loading…' : 'N/A' : money(q.regularMarketPrice)}</strong><div class="${color}">${changeText}</div></div>`;
+    setHTML(modal.querySelector('.tv-summary'), `<div><strong class="tv-symbol">$${escape(q.symbol || state.ticker)}</strong><div class="tv-fullname">${escape(q.longName || '')}</div><div class="tv-company-context">${escape(q.sector || '')}${q.industry ? ` · ${escape(q.industry)}` : ''}</div></div><div class="tv-price-section"><strong class="tv-price">${q.regularMarketPrice == null ? state.loading.has('base') ? 'Loading…' : 'N/A' : money(q.regularMarketPrice)}</strong><div class="${color}">${changeText}</div></div>`);
     if (state.source && TickerView.normalizeSymbol(state.source) !== state.ticker) { const resolved = document.createElement('div'); resolved.className = 'tv-company-context'; resolved.textContent = `Resolved from ${state.source}`; modal.querySelector('.tv-summary > div').append(resolved); }
     const quoteDate = q.quoteTime ? new Date(q.quoteTime * 1000).toLocaleString() : 'unavailable';
     const oldQuote = q.quoteTime && Date.now() / 1000 - q.quoteTime > 15 * 60;
@@ -415,13 +421,13 @@
     q.relStrengthSector = bench?.sector?.date === q.sessionDate && change != null && bench.sector.change != null ? change - bench.sector.change : null;
     const percentages = new Set(['relStrength', 'relStrengthSector', 'atrPct', 'vwapDist', 'dist200', 'bbPct', 'adrPct', 'gapPct', 'shortFloatPct']);
     const missing = [];
-    modal.querySelector('.tv-stats-grid').innerHTML = settings.indicators.map(key => {
+    setHTML(modal.querySelector('.tv-stats-grid'), settings.indicators.map(key => {
       const value = q[key];
       const loading = ['marketCap', 'shortFloatPct', 'shortRatio'].includes(key) ? state.loading.has('details') : ['vwap', 'vwapDist', 'regularMarketVolume', 'fiftyTwoWeekRange'].includes(key) ? state.loading.has('base') : key.startsWith('relStrength') ? state.loading.has('details') || state.loading.has('base') || state.loading.has('technicals') : state.loading.has('technicals');
       if (value == null && !loading) { missing.push(indicators[key]); return ''; }
       const formatted = ['marketCap', 'regularMarketVolume'].includes(key) ? compactNumber(value) : typeof value === 'string' ? escape(value) : number(value, percentages.has(key) ? key.startsWith('relStrength') ? ' pp' : '%' : key === 'rvol' ? '×' : '');
       return `<div class="tv-stat-item" data-indicator="${key}"><span class="tv-stat-label">${escape(key === 'relStrengthSector' && q.sectorEtf ? `RS vs ${q.sectorEtf}` : indicators[key])}</span><span class="tv-stat-value">${value == null && loading ? '…' : formatted}</span></div>`;
-    }).join('');
+    }).join(''));
     const nonEquityInstrument = ['INDEX', 'CRYPTOCURRENCY', 'CURRENCY', 'FUTURE'].includes(q.instrumentType) || state.ticker.startsWith('^') || /-USD$/.test(state.ticker);
     const fundamentals = nonEquityInstrument ? {} : q.fundamentals || {};
     const fundamentalFields = [
@@ -434,12 +440,12 @@
       ['freeCashFlow', 'Free cash flow', 'cash'], ['totalCash', 'Total cash', 'cash'], ['totalDebt', 'Total debt', 'cash']
     ].filter(([key]) => Number.isFinite(fundamentals[key]));
     const fundamentalsBody = modal.querySelector('.tv-fundamentals-body');
-    fundamentalsBody.innerHTML = fundamentalFields.length ? `<div class="tv-stats-grid">${fundamentalFields.map(([key, label, format]) => {
+    setHTML(fundamentalsBody, fundamentalFields.length ? `<div class="tv-stats-grid">${fundamentalFields.map(([key, label, format]) => {
       const value = fundamentals[key];
       const currency = format === 'cash' ? fundamentals.currency : fundamentals.quoteCurrency || q.currency;
       const formatted = format === 'percent' ? number(value * 100, '%') : format === 'cash' ? compactNumber(value) : number(value, format === 'ratio' ? '×' : '');
       return `<div class="tv-stat-item" data-fundamental="${key}"><span class="tv-stat-label">${label}</span><span class="tv-stat-value">${['cash', 'eps'].includes(format) ? `${escape(currency || 'Currency unreported')} ` : ''}${formatted}</span></div>`;
-    }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : nonEquityInstrument ? 'Company fundamentals do not apply to this instrument.' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`;
+    }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : nonEquityInstrument ? 'Company fundamentals do not apply to this instrument.' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`);
     renderValuation(q);
     let extras = '';
     if (q.earningsTimestamp) {
@@ -455,18 +461,18 @@
     if (missing.length) extras += `<p class="tv-missing">Unavailable: ${escape(missing.join(', '))}.</p>`;
     const dates = [['Daily history', state.statuses.technicals], [state.sources?.profile?.provider ? `Fundamentals (${state.sources.profile.provider})` : 'Fundamentals', state.sources?.profile], ['News', state.sources?.news], ['SPY', state.sources?.spy], ['Sector', state.sources?.sector]].filter(([,v]) => v);
     extras += `<div class="tv-source-dates">${dates.map(([label, s]) => `${label}: ${new Date(s.fetchedAt).toLocaleString()}${s.stale ? ' (stale)' : ''}`).map(escape).join('<br>')}</div>`;
-    modal.querySelector('.tv-extras').innerHTML = extras;
+    setHTML(modal.querySelector('.tv-extras'), extras);
     const sentiment = q.categorySentiment;
     const news = modal.querySelector('.tv-news');
     news.querySelector('summary').textContent = `News and sentiment · ${sentiment?.total.label || (state.loading.has('details') ? 'Loading…' : 'Unavailable')}`;
-    news.querySelector('.tv-news-body').innerHTML = sentiment ? `<p>Headline heuristic · ${sentiment.total.count} fresh articles · score ${number(sentiment.total.score)}</p><p>${['corporate', 'macro', 'regulation', 'retail'].map(cat => `${cat}: ${sentiment[cat].label} (${sentiment[cat].count})`).map(escape).join(' · ')}</p>${sentiment.items.map(item => {
+    setHTML(news.querySelector('.tv-news-body'), sentiment ? `<p>Headline heuristic · ${sentiment.total.count} fresh articles · score ${number(sentiment.total.score)}</p><p>${['corporate', 'macro', 'regulation', 'retail'].map(cat => `${cat}: ${sentiment[cat].label} (${sentiment[cat].count})`).map(escape).join(' · ')}</p>${sentiment.items.map(item => {
       const url = safeURL(item.url);
       return `<article>${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${escape(item.title)}</a>` : escape(item.title)}<div>${item.time ? escape(new Date(item.time * 1000).toLocaleString()) : 'Time unknown'} · weight ${number(item.decay)} · score ${number(item.score)}<br>Matched: ${escape(item.matched.join(', ') || 'none')}</div></article>`;
-    }).join('') || '<p>No matching headlines available.</p>'}` : '<p>News unavailable.</p>';
+    }).join('') || '<p>No matching headlines available.</p>'}` : '<p>News unavailable.</p>');
     modal.querySelector('.tv-messages').textContent = [...Object.values(state.errors), ...state.issues, ...Object.entries(state.statuses).filter(([, v]) => v.stale).map(([name]) => `${name}: cached data; refresh failed`), state.loading.size ? `Loading ${[...state.loading].join(', ')}…` : ''].filter(Boolean).join(' · ');
     const symbol = encodeURIComponent(q.symbol || state.ticker);
     const nonEquity = q.instrumentType && !['EQUITY', 'ETF'].includes(q.instrumentType) || state.ticker.startsWith('^') || /-USD$/.test(state.ticker);
-    modal.querySelector('.tv-research-dock').innerHTML = [['Yahoo Finance', `https://finance.yahoo.com/quote/${symbol}/`], ...(!nonEquity ? [['TradingView', `https://www.tradingview.com/chart/?symbol=${symbol}`], ['Finviz', `https://finviz.com/quote.ashx?t=${symbol}`], ['Insider', `https://openinsider.com/search?q=${symbol}`]] : [])].map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`).join('');
+    setHTML(modal.querySelector('.tv-research-dock'), [['Yahoo Finance', `https://finance.yahoo.com/quote/${symbol}/`], ...(!nonEquity ? [['TradingView', `https://www.tradingview.com/chart/?symbol=${symbol}`], ['Finviz', `https://finviz.com/quote.ashx?t=${symbol}`], ['Insider', `https://openinsider.com/search?q=${symbol}`]] : [])].map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`).join(''));
     drawChart(); position();
   }
   let chartIndex = 0, chartIdentity;
@@ -480,7 +486,7 @@
     const maxVol = Math.max(1, ...points.map(p => p.volume || 0));
     const coords = points.map((p, i) => `${i / (points.length - 1) * 300},${75 - (p.close - min) / range * 65}`);
     const volumes = points.map((p, i) => `<rect x="${i / (points.length - 1) * 300}" y="${98 - (p.volume || 0) / maxVol * 20}" width="${Math.max(.5, 280 / points.length)}" height="${(p.volume || 0) / maxVol * 20}" class="tv-volume-bar"/>`).join('');
-    container.innerHTML = `<svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">${volumes}<polyline points="${coords.join(' ')}" fill="none" class="tv-chart-line" stroke-width="1.5"/><line class="tv-crosshair" y1="0" y2="100" stroke-dasharray="3 3"/></svg>`;
+    setHTML(container, `<svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">${volumes}<polyline points="${coords.join(' ')}" fill="none" class="tv-chart-line" stroke-width="1.5"/><line class="tv-crosshair" y1="0" y2="100" stroke-dasharray="3 3"/></svg>`);
     chartIndex = points.length - 1; inspectChart(chartIndex);
   }
   function inspectChart(index) {
@@ -542,9 +548,12 @@
     const target = event.target.closest?.('.tickerview-highlight');
     if (!active || !target || pinned || target.contains(event.relatedTarget)) return;
     clearTimeout(hideTimer); clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => { void openTicker(target.dataset.ticker, target); }, settings.hoverDelay);
-  });
-  document.addEventListener('mouseout', event => { const target = event.target.closest?.('.tickerview-highlight'); if (target && !target.contains(event.relatedTarget)) hideLater(400); });
+    hoverTimer = setTimeout(() => {
+      const ticker = target.isConnected && cashtag(target.textContent);
+      if (ticker) void openTicker(ticker, target);
+    }, settings.hoverDelay);
+  }, true);
+  document.addEventListener('mouseout', event => { const target = event.target.closest?.('.tickerview-highlight'); if (target && !target.contains(event.relatedTarget)) hideLater(400); }, true);
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !modal.hidden) { event.preventDefault(); close(); return; }
     const target = event.target.closest?.('.tickerview-highlight');
