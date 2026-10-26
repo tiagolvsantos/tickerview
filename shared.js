@@ -106,5 +106,9 @@ globalThis.TickerView = (() => {
       .filter(([, value]) => positive(value)).map(([label, value]) => ({ label, value, difference: difference(value) })) : [];
     return { reason, scenarios, targets };
   }
-  return { overviewSymbols, dashboardPreferences, windowBounds, builtinAliases, aliasKey, setAliases, resolveSymbol, sortModes, sortSymbols, valuationDefaults, valuationAssumptions, valuation, indicators, groups, presets, normalizeSymbol, cleanSymbols, defaults, settings: value => settings({ ...defaults, ...value }) };
+  const cardSectionKeys = ['note', 'valuation', 'assumptions', 'fundamentals', 'news', 'guide'];
+  function cardSections(value = {}) {
+    return Object.fromEntries(cardSectionKeys.filter(key => typeof value?.[key] === 'boolean').map(key => [key, value[key]]));
+  }
+  return { cardSectionKeys, cardSections, overviewSymbols, dashboardPreferences, windowBounds, builtinAliases, aliasKey, setAliases, resolveSymbol, sortModes, sortSymbols, valuationDefaults, valuationAssumptions, valuation, indicators, groups, presets, normalizeSymbol, cleanSymbols, defaults, settings: value => settings({ ...defaults, ...value }) };
 })();

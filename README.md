@@ -6,7 +6,7 @@ TickerView is a Manifest V3 Chrome extension that highlights stock cashtags on s
 
 ![TickerView hover card with interactive chart, technical indicators, sentiment, and research links](images/image1.png)
 
-![TickerView settings, local watchlist, and recent tickers](images/image2.png)
+![TickerView market window with RSI, YTD anchored VWAP, price distance, saved notes and recent tickers](images/image2.png)
 
 ![Company fundamentals with valuation, revenue, profitability, cash flow, cash and debt](images/image3.png)
 
@@ -17,6 +17,10 @@ TickerView is a Manifest V3 Chrome extension that highlights stock cashtags on s
 ![X Pro and OldTweetDeck cashtag highlighting with currency amounts left as text](images/image6.png)
 
 ![Earnings value scenarios, editable P/E assumptions, and separate analyst targets](images/image7.png)
+
+![Drag-and-drop watchlist ordering with keyboard controls](images/image8.png)
+
+![Watchlist column descriptions on hover and keyboard focus](images/image9.png)
 
 These images show the actual extension interface with illustrative demo data, not live quotes.
 
@@ -36,6 +40,14 @@ Logo and font assets come from `cerberus_terminal/web/assets/`; palette tokens f
 **No Node runtime, npm install, build step, account, or server is required to use the extension.** Chrome directly loads the JavaScript, HTML, and CSS files.
 
 ## Features
+
+- **Watchlist indicators:** daily **RSI (14)** and **YTD VWAP*** sit beside Price and Change. The **Δ VWAP** column shows percentage above/below YTD VWAP with the absolute difference underneath in quote currency, using the same cached/stale status. RSI reuses Wilder smoothing. YTD VWAP is an estimate from available daily closes × volumes, anchored to January 1 of the quote’s exchange-local session year; the current partial session is rebuilt from intraday data when available. It differs from tick VWAP and the card’s session VWAP. Refresh loads saved-symbol indicators independently of quote success, reusing the six-hour daily-history cache. Missing/insufficient data shows a dash; stale/error data is labeled and source dates appear in cell tooltips. Narrow windows scroll horizontally. Hover or focus any column heading for its description.
+
+- **Targeted retry:** the freshness area offers **Retry quotes** for unavailable, stale, or failed overview/watchlist quotes. It refreshes only those symbols through the existing queue, shared requests, and failure cooldowns.
+- **Manual watchlist order:** choose **Reorder** to switch to Saved order and clear filtering, then drag a row handle above or below another row. Keyboard users can focus a handle and press Up/Down. Choose **Done** or press Escape to finish. Moves save locally immediately and are included in backups; switching column sorts preserves this order.
+- **Watchlist shortcuts:** use **+ Add** to reveal the add form (Escape closes it), filter saved symbols by ticker or company (**/** focuses the filter; **Escape** clears it), and undo the latest removal until dismissed or the window closes. Undo restores the saved-order position. Filtering does not change which symbols refresh. Percentage change leads each row, with absolute change underneath and a saved-note indicator beside symbols with notes.
+- **Adaptive layout:** wider market windows provide more room for company names and prices; at 900 px, recent tickers move into a sidebar. Freshness, refresh progress, failures, and automatic-refresh controls share a compact status area.
+- **Remembered card sections:** expanding or collapsing note, valuation, assumptions, fundamentals, news, and guide sections saves a local preference shared across tickers and supported tabs. These presentation preferences are excluded from backups.
 
 - **Market overview:** SPY, QQQ, VIX (`^VIX`), and BTC (`BTC-USD`) quotes sit above the watchlist. With auto-refresh off, opening the window requests only these four symbols using the shared quote cache; clicking a tile opens its card without saving it. Refresh updates the overview and watchlist together through a shared three-request queue.
 - **Header sorting and freshness:** click Symbol, Price, or Change to toggle sort direction; Change sorts by daily percentage, Price by numeric quote-currency price. Missing values remain last. The gear menu retains saved-order/company sorting. “Updated … ago” uses the oldest available source retrieval among displayed quotes, separately from quote timestamps shown in tooltips. Cached/failed and missing quotes are identified. **Settings → Market** configures auto-refresh (enabled by default at 15 seconds; choose 15/30 seconds or 1/2/5 minutes, or switch it off). A live countdown shows the next update; hidden windows pause and resume without overlapping refreshes. The circular-arrow button refreshes immediately and spins while loading. Automatic dashboard quote-cache freshness follows the selected interval; manual refresh bypasses fresh cache entries while retaining request coalescing and failure cooldowns.

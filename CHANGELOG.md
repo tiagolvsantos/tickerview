@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-10-26
+
+Minor release adding watchlist indicators, manual ordering, faster controls, and clearer market-window layouts.
+
+### Added
+
+- Daily RSI (14), estimated YTD anchored VWAP, and a Δ VWAP column showing percentage and absolute price distance with directional colors. Indicator history failures leave successful quotes usable; missing and stale data stay labeled.
+- Column descriptions on hover and keyboard focus, including formulas, quote-currency units, source context, and estimate limitations.
+- Drag-and-drop watchlist reordering with keyboard Up/Down controls, visible drop markers, and immediate local persistence in Saved order.
+- Collapsible Add symbol form, local symbol/company filtering, and Undo for the latest watchlist removal.
+- `/` to focus the watchlist filter and Escape to clear it; targeted Retry quotes for unavailable, stale, or failed dashboard symbols through the existing queue and cooldowns.
+- Saved-note indicators on watchlist rows and remembered card-section expansion across tickers and tabs, preserving note drafts and leave prompts. Section preferences remain local and are excluded from backups.
+- Wider watchlist spacing, horizontal scrolling for indicator columns in narrow windows, and a recent-tickers sidebar in large market windows.
+
+### Changed
+
+- Lead daily change with percentage above the absolute amount, render currencies more quietly, and consolidate refresh progress, failures, and freshness into one status area.
+- Refresh the repository screenshots and promotional PNG/SVG tiles with deterministic demo data; add dedicated reordering and column-description images and update the README gallery and generators.
+- Align the extension manifest, package, lockfile, and displayed version at 2.2.0.
+
 ## [2.1.1] - 2026-10-24
 
 ### Fixed

@@ -14,12 +14,12 @@ globalThis.fetch = async url => {
 await import('../background.js');
 const send = request => new Promise(resolve => listener(request, { id: 'dashboard-test' }, resolve));
 test('automatic quote freshness follows configured seconds and manual refresh bypasses fresh cache', async () => {
-  await send({ action: 'refreshDashboard' }); assert.equal(calls, 5);
-  now += 14999; await send({ action: 'refreshDashboard' }); assert.equal(calls, 5);
-  now++; await send({ action: 'refreshDashboard' }); assert.equal(calls, 10);
-  now += 1000; await send({ action: 'refreshDashboard', force: true }); assert.equal(calls, 15);
+  await send({ action: 'refreshDashboard' }); assert.equal(calls, 6);
+  now += 14999; await send({ action: 'refreshDashboard' }); assert.equal(calls, 6);
+  now++; await send({ action: 'refreshDashboard' }); assert.equal(calls, 11);
+  now += 1000; await send({ action: 'refreshDashboard', force: true }); assert.equal(calls, 16);
   await send({ action: 'setDashboardPreferences', patch: { refreshInterval: 30 } });
-  now += 15000; await send({ action: 'refreshDashboard' }); assert.equal(calls, 15);
-  now += 15000; await send({ action: 'refreshDashboard' }); assert.equal(calls, 20);
+  now += 15000; await send({ action: 'refreshDashboard' }); assert.equal(calls, 16);
+  now += 15000; await send({ action: 'refreshDashboard' }); assert.equal(calls, 21);
   assert.equal((await send({ action: 'setDashboardPreferences', patch: { refreshInterval: 1 } })).success, false);
 });

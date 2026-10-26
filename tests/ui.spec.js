@@ -47,6 +47,7 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
             else valuationScenarios[request.ticker] = TickerView.valuationAssumptions(request.assumptions);
             await window.updateStorage({ valuationScenarios }); return { success: true, valuationScenarios };
           }
+          if (request.action === 'setCardSection') { await window.updateStorage({ cardSections: { ...values.cardSections, [request.section]: request.open } }); return { success: true }; }
           if (request.action === 'getNote') return { success: true, note: values.tickerNotes?.[request.ticker] || { text: '', revision: null } };
           if (request.action === 'saveNote') {
             const tickerNotes = { ...values.tickerNotes }, current = tickerNotes[request.ticker] || { text: '', revision: null };
@@ -69,12 +70,12 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
           if (['refreshWatchlist', 'refreshDashboard'].includes(request.action)) {
             if (window.blockRefresh) await new Promise(resolve => { window.releaseRefresh = resolve; });
             const quoteSnapshots = { ...values.quoteSnapshots }, marketOverview = { ...values.marketOverview }, outcomes = {};
-            const symbols = request.action === 'refreshDashboard' ? [...new Set([...TickerView.overviewSymbols, ...values.watchlist])] : values.watchlist;
+            const symbols = request.symbols || (request.action === 'refreshDashboard' ? [...new Set([...TickerView.overviewSymbols, ...values.watchlist])] : values.watchlist);
             for (const symbol of symbols) {
-              outcomes[symbol] = symbol === 'FAIL' ? { error: 'offline' } : { stale: false };
-              const quote = { name: symbol + ' Inc.', price: 200, currency: 'USD', change: 10, changePercent: 5, fetchedAt: Date.now() };
-              if (symbol !== 'FAIL' && values.watchlist.includes(symbol)) quoteSnapshots[symbol] = quote;
-              if (symbol !== 'FAIL' && TickerView.overviewSymbols.includes(symbol)) marketOverview[symbol] = quote;
+              outcomes[symbol] = symbol === 'FAIL' && !window.recoverQuotes ? { error: 'offline' } : { stale: false };
+              const quote = { name: symbol + ' Inc.', price: 200, currency: 'USD', change: 10, changePercent: 5, fetchedAt: Date.now(), sessionDate: '2026-10-23', quickIndicators: { rsi: 55, ytdVwap: 180, sessionDate: '2026-10-23', fetchedAt: Date.now() } };
+              if ((symbol !== 'FAIL' || window.recoverQuotes) && values.watchlist.includes(symbol)) quoteSnapshots[symbol] = quote;
+              if ((symbol !== 'FAIL' || window.recoverQuotes) && TickerView.overviewSymbols.includes(symbol)) marketOverview[symbol] = quote;
               await window.updateStorage({ quoteSnapshots: { ...quoteSnapshots }, marketOverview: { ...marketOverview }, watchRefresh: { completed: Object.keys(outcomes).length, total: symbols.length, outcomes: { ...outcomes } } });
             }
             return { success: true, outcomes, marketOverview };
@@ -104,10 +105,19 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
             await window.updateStorage({ settings: { ...values.settings, ...request.patch, ...(request.site ? { disabledSites: request.siteEnabled ? [] : [request.site] } : {}) } });
             return { success: true };
           }
+          if (request.action === 'moveWatch') {
+            if (window.failMove) return { success: false, error: 'Could not save order' };
+            const watchlist = [...values.watchlist];
+            if (!watchlist.includes(request.ticker) || !watchlist.includes(request.target)) return { success: false, error: 'Watchlist changed' };
+            if (request.ticker !== request.target) { watchlist.splice(watchlist.indexOf(request.ticker), 1); watchlist.splice(watchlist.indexOf(request.target) + (request.position === 'after' ? 1 : 0), 0, request.ticker); }
+            await window.updateStorage({ watchlist, watchSort: 'saved' }); return { success: true, watchlist };
+          }
           if (request.action === 'watch') {
             const symbol = request.ticker.replace(/^([A-Z]+)\.([AB])$/, '$1-$2');
             const saved = values.watchlist.includes(symbol); const wanted = typeof request.saved === 'boolean' ? request.saved : !saved;
-            const watchlist = wanted ? [...new Set([symbol, ...values.watchlist])] : values.watchlist.filter(x => x !== symbol);
+            if (wanted && !saved && values.watchlist.length >= 100) return { success: false, error: 'Watchlist limit is 100 symbols' };
+            const watchlist = wanted ? saved ? [...values.watchlist] : [...values.watchlist] : values.watchlist.filter(x => x !== symbol);
+            if (wanted && !saved) watchlist.splice(request.index ?? 0, 0, symbol);
             await window.updateStorage({ watchlist }); return { success: true, watchlist };
           }
           const ticker = request.ticker, delay = ticker === 'AAPL' ? 180 : 20;
@@ -215,8 +225,10 @@ test('popup settings, per-site toggle, normalized saved symbols and remove', asy
   await page.locator('#siteEnabled').uncheck();
   await expect(page.locator('#siteEnabled')).not.toBeChecked();
   await page.locator('#close-settings').click();
+  await page.locator('#toggle-add').click();
   await page.locator('#symbol').fill('BRK.B'); await page.locator('#add-symbol button').click();
   await expect(page.locator('#watchlist')).toContainText('BRK-B');
+  await page.locator('#toggle-add').click();
   await page.locator('#symbol').fill('BRK.B'); await page.locator('#add-symbol button').click();
   await expect(page.locator('#symbol-feedback')).toContainText('already saved');
   await expect(page.locator('#watchlist .watch-row')).toHaveCount(1);
@@ -383,6 +395,7 @@ test('popup presets, master switch, validated entry, cached rows, cards, recent 
   await page.locator('[data-preset="All"]').click(); await expect(page.locator('#indicator-count')).toHaveText('21 selected');
   await page.locator('#indicator-options summary').click();
   await page.locator('#close-settings').click();
+  await page.locator('#toggle-add').click();
   await page.locator('#symbol').fill('$5B'); await page.locator('#symbol').press('Enter');
   await expect(page.locator('#symbol')).toHaveAttribute('aria-invalid', 'true');
   await expect(page.locator('#symbol-feedback')).toContainText('currency amount');
@@ -553,7 +566,7 @@ test('notes preserve drafts across refresh and ranges and offer cancel, discard,
   await page.keyboard.press('Escape'); await expect(page.locator('.tv-note-prompt')).toBeVisible();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(note).toHaveValue('draft');
   await page.keyboard.press('Escape'); await page.getByRole('button', { name: 'Save and continue' }).click(); await expect(page.locator('#tickerview-modal')).toBeHidden();
-  await page.locator('#search-symbol').press('Enter'); await page.locator('.tv-note summary').click(); await expect(note).toHaveValue('draft');
+  await page.locator('#search-symbol').press('Enter'); await expect(page.locator('.tv-note')).toHaveAttribute('open', ''); await expect(note).toHaveValue('draft');
   await note.fill('new draft');
   await page.evaluate(() => window.updateStorage({ tickerNotes: { AAPL: { text: 'remote', revision: 'remote-1' } } }));
   await expect(note).toHaveValue('new draft'); await expect(page.locator('.tv-note-conflict')).toBeVisible();
@@ -570,7 +583,7 @@ test('watchlist refresh keeps failed rows and sorts missing data last without fe
   await page.getByRole('button', { name: 'Sort by daily percentage change' }).click();
   await expect(page.locator('.watch-identity strong')).toHaveText(['A', 'FAIL', 'B']);
   await page.locator('#refresh-watchlist').click();
-  await expect(page.locator('#refresh-feedback')).toContainText('7 checked · 1');
+  await expect(page.locator('#refresh-feedback')).toContainText('1 unavailable');
   await expect(page.locator('.watch-identity strong')).toHaveText(['A', 'B', 'FAIL']);
   await expect(page.locator('.watch-row').filter({ hasText: 'Failure Inc.' })).toContainText('99');
   await expect(page.locator('.watch-warning')).toContainText('offline');
@@ -654,8 +667,8 @@ test('market-first watchlist table and gear settings work at normal and narrow w
   } });
   await expect(page.locator('#settings-dialog')).toBeHidden();
   await expect(page.getByRole('table', { name: 'Watchlist quotes' })).toBeVisible();
-  await expect(page.getByRole('columnheader')).toHaveText(['Symbol / company ↕', 'Price ↕', 'Change ↕', 'Actions']);
-  await expect(page.locator('.watch-row').first().locator('td')).toHaveCount(4);
+  await expect(page.getByRole('columnheader')).toHaveText(['Symbol / company ↕', 'Price ↕', 'Change ↕', 'RSI (14)', 'YTD VWAP*', 'Δ VWAP', '× Actions']);
+  await expect(page.locator('.watch-row').first().locator('td')).toHaveCount(7);
   expect((await page.locator('#watchlist').boundingBox()).y).toBeLessThan(340);
   await page.screenshot({ path: 'test-results/market-table.png' });
   await page.locator('#open-settings').click(); await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
@@ -790,4 +803,233 @@ test('auto refresh is visible on first opening, has a direct enable shortcut, an
   await page.locator('#close-settings').click();
   await page.locator('#open-settings').click(); await expect(toggle).toBeVisible(); await expect(toggle).not.toBeChecked();
   await expect(page.getByRole('tab', { name: 'Market', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('watchlist disclosure, local filter, undo, notes, and percentage hierarchy', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: {
+    watchlist: ['AAPL', 'MSFT', 'GOOG'],
+    tickerNotes: { AAPL: { text: 'Research', revision: '1' } },
+    quoteSnapshots: { AAPL: { name: 'Apple Inc.', price: 123, currency: 'USD', change: 2, changePercent: 1.65 } }
+  } });
+  await expect(page.locator('#add-symbol')).toBeHidden();
+  await page.locator('#toggle-add').click();
+  await expect(page.locator('#symbol')).toBeFocused();
+  await page.locator('#symbol').press('Escape');
+  await expect(page.locator('#add-symbol')).toBeHidden();
+  await expect(page.locator('#toggle-add')).toBeFocused();
+  await expect(page.locator('.note-marker')).toHaveCount(1);
+  expect(await page.locator('.watch-change').first().evaluate(el => el.firstElementChild.className)).toContain('watch-change-percent');
+  await page.locator('#watch-filter').fill('apple');
+  await expect(page.locator('.watch-row')).toHaveCount(1);
+  await expect(page.locator('#watch-count')).toHaveText('1/3');
+  await page.locator('#refresh-watchlist').click();
+  await expect(page.locator('#refresh-watchlist')).toBeEnabled();
+  await expect(page.locator('#refresh-feedback')).toBeEmpty();
+  await expect(page.locator('#watch-filter')).toHaveValue('apple');
+  await page.locator('#watch-filter').fill('nothing');
+  await expect(page.locator('#watchlist')).toHaveText('No matching symbols');
+  await page.locator('#clear-filter').click();
+  await page.getByRole('button', { name: 'Remove MSFT', exact: true }).click();
+  await expect(page.locator('#undo-remove')).toBeFocused();
+  await page.evaluate(() => window.updateStorage({ watchlist: ['AAPL', 'GOOG', 'NVDA'] }));
+  await page.locator('#undo-remove').click();
+  await expect(page.locator('.watch-identity strong')).toHaveText(['AAPL', 'MSFT', 'GOOG', 'NVDA']);
+  await page.evaluate(() => window.updateStorage({ tickerNotes: {} }));
+  await expect(page.locator('.note-marker')).toHaveCount(0);
+  await page.evaluate(() => window.updateStorage({ tickerNotes: { GOOG: { text: 'New note', revision: '2' } } }));
+  await expect(page.locator('.note-marker')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Remove GOOG', exact: true }).click();
+  await page.evaluate(() => window.updateStorage({ watchlist: Array.from({ length: 100 }, (_, i) => `SYM${i}`) }));
+  await page.locator('#undo-remove').click();
+  await expect(page.locator('#watch-action')).toContainText('Watchlist limit');
+  await page.locator('#dismiss-undo').click();
+  await expect(page.locator('#watch-action')).toBeHidden();
+});
+
+test('card section preferences restore across symbols and preserve drafts during refresh', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL', 'MSFT'], cardSections: { fundamentals: false, valuation: false, note: true } } });
+  await page.getByRole('button', { name: 'Open AAPL stock card', exact: true }).click();
+  await expect(page.locator('.tv-fundamentals')).not.toHaveAttribute('open', '');
+  await expect(page.locator('.tv-valuation')).not.toHaveAttribute('open', '');
+  await expect(page.locator('#tv-note-text')).toBeEnabled();
+  await page.locator('#tv-note-text').fill('Draft survives');
+  await page.locator('.tv-news > summary').click();
+  await expect.poll(() => page.evaluate(() => window.testCalls.filter(call => call.action === 'setCardSection' && call.section === 'news').at(-1)?.open)).toBe(true);
+  await page.locator('[data-action="refresh"]').click();
+  await expect(page.locator('#tv-note-text')).toHaveValue('Draft survives');
+  await page.locator('[data-action="close"]').click();
+  await page.locator('[data-action="note-discard"]').click();
+  await page.getByRole('button', { name: 'Open MSFT stock card', exact: true }).click();
+  await expect(page.locator('.tv-news')).toHaveAttribute('open', '');
+  await expect(page.locator('.tv-fundamentals')).not.toHaveAttribute('open', '');
+  await page.locator('[data-action="close"]').click();
+  const stored = await page.evaluate(() => chrome.storage.local.get());
+  await mockChrome(page, { popup: true, initial: stored });
+  await page.getByRole('button', { name: 'Open AAPL stock card', exact: true }).click();
+  await expect(page.locator('.tv-news')).toHaveAttribute('open', '');
+});
+
+test('responsive market window keeps controls usable from narrow to wide', async ({ page }) => {
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: Array.from({ length: 100 }, (_, i) => `SYM${i}`), recent: ['AAPL', 'MSFT'],
+    quoteSnapshots: { SYM0: { name: 'A very long company name that should remain inside its table column', price: 123456.78, currency: 'USD', change: 1234.56, changePercent: 12.34 } }
+  } });
+  for (const width of [320, 420, 640, 900]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(page.locator('.watch-row')).toHaveCount(100);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const watch = await page.locator('.watch-section').boundingBox(), recent = await page.locator('.recent-section').boundingBox();
+    if (width === 900) expect(recent.x).toBeGreaterThan(watch.x + watch.width);
+    else expect(recent.y).toBeGreaterThan(watch.y);
+    await page.screenshot({ path: `test-results/market-${width}.png` });
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('#toggle-add').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('#symbol')).toBeFocused();
+  await page.keyboard.press('Escape'); await expect(page.locator('#toggle-add')).toBeFocused();
+});
+
+test('filter shortcut respects editors and dialogs and Escape clears only the filter', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL', 'MSFT'] } });
+  await page.locator('#toggle-add').focus(); await page.keyboard.press('/');
+  await expect(page.locator('#watch-filter')).toBeFocused();
+  await page.keyboard.type('aapl'); await expect(page.locator('.watch-row')).toHaveCount(1);
+  await page.keyboard.press('Escape'); await expect(page.locator('#watch-filter')).toHaveValue('');
+  await expect(page.locator('#watch-filter')).toBeFocused(); await expect(page.locator('.watch-row')).toHaveCount(2);
+  await page.locator('#search-symbol').focus(); await page.keyboard.press('/');
+  await expect(page.locator('#search-symbol')).toHaveValue('/');
+  await page.locator('#open-settings').click(); await page.keyboard.press('/');
+  await expect(page.locator('#watch-filter')).not.toBeFocused();
+  await page.keyboard.press('Escape'); await expect(page.locator('#settings-dialog')).toBeHidden();
+  await page.getByRole('button', { name: 'Open AAPL stock card', exact: true }).click();
+  await page.keyboard.press('/'); await expect(page.locator('#watch-filter')).not.toBeFocused();
+  await page.keyboard.press('Escape'); await expect(page.locator('#tickerview-modal')).toBeHidden();
+});
+
+test('retry quotes targets only failures, preserves good rows, and restores refresh focus on recovery', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL', 'FAIL'] } });
+  await page.locator('#refresh-watchlist').click(); await expect(page.locator('#refresh-watchlist')).toBeEnabled();
+  await expect(page.locator('#retry-quotes')).toHaveText('Retry quotes (1)');
+  await page.evaluate(() => { window.recoverQuotes = true; window.blockRefresh = true; });
+  await page.locator('#retry-quotes').click();
+  await expect(page.locator('#retry-quotes')).toBeDisabled(); await expect(page.locator('#refresh-watchlist')).toBeDisabled();
+  const call = await page.evaluate(() => window.testCalls.filter(call => call.action === 'refreshDashboard').at(-1));
+  expect(call.symbols).toEqual(['FAIL']); expect(call.force).toBe(true);
+  await expect(page.locator('.watch-row').first()).toContainText('200');
+  await page.screenshot({ path: 'test-results/retry-quotes-narrow.png' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => window.releaseRefresh());
+  await expect(page.locator('#retry-quotes')).toBeHidden();
+  await expect(page.locator('#refresh-feedback')).toBeEmpty();
+  await expect(page.locator('#refresh-watchlist')).toBeFocused();
+  await expect(page.locator('.watch-warning')).toHaveCount(0);
+});
+
+test('watchlist drag reordering saves manual order and keyboard moves preserve focus', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 420, height: 800 });
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL', 'MSFT', 'GOOG'], watchSort: 'symbol' } });
+  await page.locator('#watch-filter').fill('aapl');
+  await page.locator('#reorder-watchlist').click();
+  await expect(page.locator('#watch-filter')).toHaveValue(''); await expect(page.locator('#watch-filter')).toBeDisabled();
+  await expect(page.locator('[data-sort-key="symbol"]')).toBeDisabled();
+  await expect(page.locator('.watch-identity strong')).toHaveText(['AAPL', 'MSFT', 'GOOG']);
+  const last = page.locator('.watch-row').last(), box = await last.boundingBox();
+  await page.getByRole('button', { name: 'Move AAPL', exact: true }).dragTo(last, { targetPosition: { x: 80, y: box.height - 2 } });
+  await expect(page.locator('.watch-identity strong')).toHaveText(['MSFT', 'GOOG', 'AAPL']);
+  await expect(page.locator('#reorder-feedback')).toHaveText('Moved AAPL after GOOG');
+  await expect(page.getByRole('button', { name: 'Move AAPL', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.locator('.watch-identity strong')).toHaveText(['MSFT', 'AAPL', 'GOOG']);
+  await expect(page.getByRole('button', { name: 'Move AAPL', exact: true })).toBeFocused();
+  await page.evaluate(() => window.updateStorage({ quoteSnapshots: { AAPL: { price: 99 } } }));
+  await expect(page.getByRole('button', { name: 'Move AAPL', exact: true })).toBeFocused();
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/watchlist-reorder-narrow.png' });
+  await page.keyboard.press('Escape'); await expect(page.locator('#reorder-watchlist')).toHaveText('Reorder');
+  await expect(page.locator('#reorder-watchlist')).toBeFocused(); await expect(page.locator('#watch-filter')).toBeEnabled();
+  await page.getByRole('button', { name: 'Sort by symbol', exact: true }).click();
+  await expect(page.locator('.watch-identity strong')).toHaveText(['AAPL', 'GOOG', 'MSFT']);
+  await page.locator('#reorder-watchlist').click();
+  await expect(page.locator('.watch-identity strong')).toHaveText(['MSFT', 'AAPL', 'GOOG']);
+  await page.evaluate(() => { window.failMove = true; });
+  await page.getByRole('button', { name: 'Move AAPL', exact: true }).press('ArrowDown');
+  await expect(page.locator('#reorder-feedback')).toHaveText('Could not save order');
+  await expect(page.locator('.watch-identity strong')).toHaveText(['MSFT', 'AAPL', 'GOOG']);
+  expect(errors).toEqual([]);
+});
+
+test('drag cancellation and quote updates do not change order or interrupt a drag', async ({ page }) => {
+  await mockChrome(page, { popup: true, initial: { watchlist: ['AAPL', 'MSFT'] } });
+  await page.locator('#reorder-watchlist').click();
+  await page.getByRole('button', { name: 'Move AAPL', exact: true }).evaluate(handle => {
+    window.dragHandle = handle; window.dragData = new DataTransfer();
+    handle.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: window.dragData }));
+  });
+  await page.evaluate(() => window.updateStorage({ quoteSnapshots: { AAPL: { price: 123 } } }));
+  expect(await page.evaluate(() => window.dragHandle.isConnected)).toBe(true);
+  await page.evaluate(() => window.dragHandle.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: window.dragData })));
+  await expect(page.locator('.watch-identity strong')).toHaveText(['AAPL', 'MSFT']);
+  await expect(page.locator('.watch-price').first()).toContainText('123');
+  expect(await page.evaluate(() => window.testCalls.filter(call => call.action === 'moveWatch'))).toEqual([]);
+  await page.getByRole('button', { name: 'Remove AAPL', exact: true }).click();
+  await page.locator('#reorder-watchlist').click();
+  await expect(page.locator('#reorder-help')).toBeHidden();
+});
+
+test('watchlist indicators show values, missing and cached states with hover and keyboard column descriptions', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const sessionDate = '2026-10-23', fetchedAt = Date.now();
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'ZERO', 'STALE', 'OLD', 'FAIL'], quoteSnapshots: {
+      AAPL: { price: 100, currency: 'USD', sessionDate, quickIndicators: { rsi: 55.12, ytdVwap: 95.123, sessionDate, fetchedAt } },
+      ZERO: { price: 1, currency: 'USD', sessionDate, quickIndicators: { rsi: 0, ytdVwap: 0, sessionDate, fetchedAt } },
+      STALE: { price: 10, currency: 'EUR', sessionDate, quickIndicators: { rsi: 70, ytdVwap: 11, sessionDate, fetchedAt, stale: true } },
+      OLD: { price: 10, sessionDate, quickIndicators: { rsi: 99, ytdVwap: 100, sessionDate: '2025-12-31', fetchedAt } },
+      FAIL: { price: 10, sessionDate, quickIndicators: { rsi: null, ytdVwap: null, sessionDate, error: 'History offline' } }
+    }
+  } });
+  await expect(page.locator('.watch-rsi')).toHaveText(['55.1', '0.0', '70.0Cached', '—', '—Unavailable']);
+  await expect(page.locator('.watch-ytd-vwap')).toHaveText(['95.12', '0.00', '11.00Cached', '—', '—Unavailable']);
+  await expect(page.locator('.watch-ytd-vwap').first()).toHaveAttribute('title', /Anchored 2026-01-01.*USD.*Daily close/);
+  await page.getByRole('button', { name: 'About YTD anchored VWAP estimate' }).hover();
+  await expect(page.getByRole('tooltip')).toContainText('sum(daily close × volume)');
+  await page.screenshot({ path: 'test-results/watchlist-indicators-wide.png' });
+  await page.getByRole('button', { name: 'About RSI (14)' }).focus();
+  await expect(page.getByRole('tooltip')).toContainText('Wilder');
+  await page.keyboard.press('Escape'); await expect(page.getByRole('tooltip')).toBeHidden();
+  await page.getByRole('button', { name: 'Sort by price', exact: true }).hover();
+  await expect(page.getByRole('tooltip')).toContainText('quote currency');
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.getByRole('button', { name: 'About YTD anchored VWAP estimate' }).focus();
+  await expect(page.getByRole('tooltip')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.getByRole('button', { name: 'About YTD anchored VWAP estimate' }).focus();
+  await expect(page.getByRole('tooltip')).toBeVisible();
+  const tooltipBox = await page.getByRole('tooltip').boundingBox();
+  expect(tooltipBox.x).toBeGreaterThanOrEqual(0); expect(tooltipBox.x + tooltipBox.width).toBeLessThanOrEqual(320);
+  await page.screenshot({ path: 'test-results/watchlist-indicators-narrow.png' });
+});
+
+test('VWAP distance uses estimate as baseline, preserves zero and missing data, and labels cached values', async ({ page }) => {
+  const sessionDate = '2026-10-23';
+  const snapshot = (price, ytdVwap, extra = {}) => ({ price, currency: 'USD', sessionDate, quickIndicators: { ytdVwap, sessionDate, ...extra } });
+  await mockChrome(page, { popup: true, initial: { watchlist: ['UP', 'DOWN', 'FLAT', 'ZERO', 'NOVOL', 'MISSING', 'OLD'], quoteSnapshots: {
+    UP: snapshot(110, 100), DOWN: snapshot(90, 100, { stale: true }), FLAT: snapshot(100, 100),
+    ZERO: snapshot(0, 100), NOVOL: snapshot(10, 0), MISSING: snapshot(null, 100), OLD: snapshot(110, 100, { sessionDate: '2025-12-31' })
+  } } });
+  await expect(page.locator('.watch-vwap-diff-percent')).toHaveText(['+10.00%', '-10.00%', '+0.00%', '-100.00%', '—', '—', '—']);
+  await expect(page.locator('.watch-vwap-diff-amount')).toHaveText(['+10.00', '-10.00', '0.00', '-100.00', '+10.00', '—', '—']);
+  await expect(page.locator('.watch-vwap-diff-percent').first()).toHaveClass(/positive/);
+  await expect(page.locator('.watch-vwap-diff-percent').nth(1)).toHaveClass(/negative/);
+  await expect(page.locator('.watch-vwap-diff').nth(1)).toContainText('Cached');
+  await expect(page.locator('.watch-vwap-diff-amount').first()).toHaveAttribute('title', /USD/);
+  await page.getByRole('button', { name: 'About distance from YTD VWAP', exact: true }).focus();
+  await expect(page.getByRole('tooltip')).toContainText('price − VWAP');
+  await page.screenshot({ path: 'test-results/watchlist-vwap-diff.png' });
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

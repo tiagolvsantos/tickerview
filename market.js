@@ -68,6 +68,19 @@ export function priceData(result) {
     fiftyTwoWeekRange: finite(m.fiftyTwoWeekLow) && finite(m.fiftyTwoWeekHigh) ? `${m.fiftyTwoWeekLow.toFixed(2)} – ${m.fiftyTwoWeekHigh.toFixed(2)}` : null
   };
 }
+export function anchoredYtdVwap(points, date, timezone = 'America/New_York') {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const anchor = `${date.slice(0, 4)}-01-01`;
+  let volume = 0, weighted = 0;
+  for (const point of points) {
+    const day = sessionDate(point.time, timezone);
+    if (day && day >= anchor && day <= date && finite(point.close) && finite(point.volume) && point.volume > 0) {
+      weighted += point.close * point.volume; volume += point.volume;
+    }
+  }
+  const value = volume > 0 ? weighted / volume : null;
+  return finite(value) ? value : null;
+}
 export function technicals(result, live = priceData(result), intradayResult = null) {
   const m = result.meta || {}, timezone = live.timezone;
   let all = bars(result).filter(p => sessionDate(p.time, timezone) <= live.sessionDate);
@@ -78,10 +91,11 @@ export function technicals(result, live = priceData(result), intradayResult = nu
     if (today.length) {
       const highs = today.flatMap(p => p.high != null ? [p.high] : []);
       const lows = today.flatMap(p => p.low != null ? [p.low] : []);
+      const intradayVolume = today.every(p => finite(p.volume) && p.volume >= 0) ? today.reduce((total, p) => total + p.volume, 0) : null;
       all = all.filter(p => sessionDate(p.time, timezone) !== live.sessionDate);
       all.push({ time: today[0].time, open: today[0].open, close: live.regularMarketPrice,
         high: highs.length ? Math.max(...highs) : null, low: lows.length ? Math.min(...lows) : null,
-        volume: live.regularMarketVolume });
+        volume: live.regularMarketVolume ?? intradayVolume });
     }
   }
   const historical = all.filter(p => sessionDate(p.time, timezone) < live.sessionDate);
@@ -98,7 +112,7 @@ export function technicals(result, live = priceData(result), intradayResult = nu
   const baseline = previous?.close;
   const change = price != null && baseline > 0 ? price - baseline : null;
   return {
-    fiftyDayAverage: ma50, twoHundredDayAverage: ma200, rsi: rsi(values), atr,
+    fiftyDayAverage: ma50, twoHundredDayAverage: ma200, rsi: rsi(values), ytdVwap: anchoredYtdVwap(all, live.sessionDate, timezone), atr,
     atrPct: atr != null && price > 0 ? atr / price * 100 : null,
     dist200: ma200 && price != null ? (price / ma200 - 1) * 100 : null,
     zScore: std > 0 && price != null ? (price - ma20) / std : null,

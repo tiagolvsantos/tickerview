@@ -163,7 +163,7 @@ test('refresh limits concurrent requests to three, coalesces refreshes, and pres
     assert.deepEqual(a, b); assert.equal(Object.keys(a.outcomes).length, 5); assert.ok(a.outcomes.NOTREAL.error);
     assert.ok(peak <= 3); assert.ok(peak > 1); assert.equal(values.watchRefresh.completed, 5);
     assert.equal(values.watchlist.length, 5);
-    assert.equal(requests.filter(url => url.includes('/REF1?')).length, 1);
+    assert.equal(requests.filter(url => url.includes('/REF1?') && url.includes('interval=5m')).length, 1);
   } finally { globalThis.fetch = original; }
 });
 test('keyboard command reuses launcher without navigating its tab', async () => {
@@ -234,4 +234,123 @@ test('market window preferences validate and manual bounds select remembered siz
   chrome.windows.get = async () => { throw new Error('closed'); }; chrome.windows.getAll = async () => [];
   try { await launch({ url: 'https://x.com/' }); assert.deepEqual({ ...createdWindows.at(-1), url: undefined }, { url: undefined, type: 'popup', width: 620, height: 760, left: 12, top: 20 }); }
   finally { chrome.windows.get = get; chrome.windows.getAll = getAll; }
+});
+
+test('undo inserts into current saved order, validates indices, and preserves concurrent additions', async () => {
+  values.watchlist = ['AAPL', 'MSFT', 'GOOG'];
+  await send({ action: 'watch', ticker: 'MSFT', saved: false });
+  await send({ action: 'watch', ticker: 'NVDA', saved: true });
+  assert.equal((await send({ action: 'watch', ticker: 'MSFT', saved: true, index: 1 })).success, true);
+  assert.deepEqual(values.watchlist, ['NVDA', 'MSFT', 'AAPL', 'GOOG']);
+  await send({ action: 'watch', ticker: 'MSFT', saved: true, index: 0 });
+  assert.deepEqual(values.watchlist, ['NVDA', 'MSFT', 'AAPL', 'GOOG']);
+  for (const index of [-1, 100, 1.5, '1', null]) {
+    assert.equal((await send({ action: 'watch', ticker: 'TSLA', saved: true, index })).success, false);
+  }
+  values.watchlist = Array.from({ length: 100 }, (_, i) => `SYM${i}`);
+  assert.equal((await send({ action: 'watch', ticker: 'TSLA', saved: true, index: 1 })).success, false);
+});
+
+test('card section preferences validate, merge, and remain outside backup data', async () => {
+  values.cardSections = { note: true, unknown: true, fundamentals: 'yes' };
+  assert.equal((await send({ action: 'setCardSection', section: 'news', open: true })).success, true);
+  assert.deepEqual(values.cardSections, { note: true, news: true });
+  await Promise.all([
+    send({ action: 'setCardSection', section: 'valuation', open: false }),
+    send({ action: 'setCardSection', section: 'guide', open: true })
+  ]);
+  assert.deepEqual(values.cardSections, { note: true, news: true, valuation: false, guide: true });
+  for (const request of [{ section: 'unknown', open: true }, { section: 'news', open: 'yes' }, { section: '__proto__', open: false }]) {
+    assert.equal((await send({ action: 'setCardSection', ...request })).success, false);
+  }
+  const exported = await send({ action: 'exportBackup' });
+  assert.equal(exported.success, true); assert.equal(exported.backup.data.cardSections, undefined);
+});
+
+test('targeted dashboard refresh validates subsets, skips removed symbols, and retains cooldowns', async () => {
+  values.watchlist = ['RETRY1', 'RETRY2', 'NOTREAL'];
+  const before = requests.length;
+  const [a, b] = await Promise.all([
+    send({ action: 'refreshDashboard', force: true, symbols: ['RETRY1', 'NOTREAL', 'REMOVED'] }),
+    send({ action: 'refreshDashboard', force: true, symbols: ['REMOVED', 'NOTREAL', 'RETRY1'] })
+  ]);
+  assert.equal(a.success, true); assert.deepEqual(a, b);
+  assert.deepEqual(Object.keys(a.outcomes).sort(), ['NOTREAL', 'RETRY1']);
+  assert.equal(requests.slice(before).some(url => /RETRY2|REMOVED|SPY/.test(url)), false);
+  assert.equal(requests.slice(before).filter(url => url.includes('/RETRY1?') && url.includes('interval=5m')).length, 1);
+  const failedRequests = requests.filter(url => url.includes('/NOTREAL?')).length;
+  await send({ action: 'refreshDashboard', force: true, symbols: ['NOTREAL'] });
+  assert.equal(requests.filter(url => url.includes('/NOTREAL?')).length, failedRequests);
+  for (const symbols of [[], null, 'RETRY1', ['../BAD'], [null], Array(105).fill('RETRY1')]) {
+    assert.equal((await send({ action: 'refreshDashboard', symbols })).success, false);
+  }
+});
+
+test('watchlist moves preserve membership and concurrent edits, validate targets, and export saved order', async () => {
+  values.watchlist = ['AAPL', 'BRK-B', 'MSFT']; values.watchSort = 'price-desc';
+  const moved = await send({ action: 'moveWatch', ticker: 'BRK.B', target: 'MSFT', position: 'after' });
+  assert.equal(moved.success, true); assert.deepEqual(values.watchlist, ['AAPL', 'MSFT', 'BRK-B']); assert.equal(values.watchSort, 'saved');
+  await send({ action: 'moveWatch', ticker: 'BRK-B', target: 'AAPL', position: 'before' });
+  assert.deepEqual(values.watchlist, ['BRK-B', 'AAPL', 'MSFT']);
+  await send({ action: 'moveWatch', ticker: 'AAPL', target: 'AAPL', position: 'after' });
+  assert.deepEqual(values.watchlist, ['BRK-B', 'AAPL', 'MSFT']);
+  await Promise.all([
+    send({ action: 'watch', ticker: 'NVDA', saved: true }),
+    send({ action: 'moveWatch', ticker: 'MSFT', target: 'BRK-B', position: 'before' })
+  ]);
+  assert.deepEqual(values.watchlist, ['NVDA', 'MSFT', 'BRK-B', 'AAPL']);
+  for (const patch of [{ target: 'MISSING' }, { ticker: 'MISSING' }, { ticker: '../BAD' }, { position: 'first' }, { target: null }]) {
+    assert.equal((await send({ action: 'moveWatch', ticker: 'AAPL', target: 'MSFT', position: 'before', ...patch })).success, false);
+  }
+  const [removed, staleMove] = await Promise.all([
+    send({ action: 'watch', ticker: 'MSFT', saved: false }),
+    send({ action: 'moveWatch', ticker: 'AAPL', target: 'MSFT', position: 'after' })
+  ]);
+  assert.equal(removed.success, true); assert.equal(staleMove.success, false);
+  assert.deepEqual(values.watchlist, ['NVDA', 'BRK-B', 'AAPL']);
+  const exported = await send({ action: 'exportBackup' });
+  assert.deepEqual(exported.backup.data.watchlist, values.watchlist); assert.equal(exported.backup.data.watchSort, 'saved');
+});
+
+test('watchlist indicators use cached daily history and failures preserve successful quote data', async () => {
+  values.watchlist = ['INDGOOD', 'INDBAD'];
+  const original = fetch;
+  globalThis.fetch = async (url, options) => {
+    if (url.includes('/INDBAD?') && url.includes('interval=1d')) throw new Error('History unavailable');
+    return original(url, options);
+  };
+  try {
+    const result = await send({ action: 'refreshDashboard', force: true, symbols: ['INDGOOD', 'INDBAD'] });
+    assert.equal(result.success, true); assert.equal(result.outcomes.INDBAD.error, null);
+    assert.equal(values.quoteSnapshots.INDBAD.price, 110);
+    assert.match(values.quoteSnapshots.INDBAD.quickIndicators.error, /History unavailable/);
+    const good = values.quoteSnapshots.INDGOOD.quickIndicators;
+    assert.equal(good.ytdVwap, 100); assert.equal(good.rsi, null);
+    assert.equal(good.sessionDate, '2026-10-23'); assert.ok(Number.isFinite(good.fetchedAt));
+    const dailyCalls = requests.filter(url => url.includes('/INDGOOD?') && url.includes('interval=1d')).length;
+    await send({ action: 'refreshDashboard', force: true, symbols: ['INDGOOD'] });
+    assert.equal(requests.filter(url => url.includes('/INDGOOD?') && url.includes('interval=1d')).length, dailyCalls);
+    const exported = await send({ action: 'exportBackup' });
+    assert.equal(exported.backup.data.quoteSnapshots, undefined);
+  } finally { globalThis.fetch = original; }
+});
+
+test('late indicator history cannot overwrite a newer quote session', async () => {
+  const symbol = 'INDLATE', original = fetch;
+  await send({ action: 'base', ticker: symbol });
+  let release, started;
+  const historyStarted = new Promise(resolve => { started = resolve; });
+  const heldHistory = new Promise(resolve => { release = resolve; });
+  globalThis.fetch = async (url, options) => {
+    if (url.includes(`/${symbol}?`) && url.includes('interval=1d')) { started(); await heldHistory; }
+    return original(url, options);
+  };
+  try {
+    const pending = send({ action: 'technicals', ticker: symbol });
+    await historyStarted;
+    const newer = { ...values.quoteSnapshots[symbol], quoteTime: times[2] + 86400, sessionDate: '2026-10-24', quickIndicators: { rsi: 60, ytdVwap: 120, sessionDate: '2026-10-24' } };
+    values.quoteSnapshots[symbol] = newer;
+    release(); assert.equal((await pending).success, true);
+    assert.deepEqual(values.quoteSnapshots[symbol], newer);
+  } finally { release(); globalThis.fetch = original; }
 });

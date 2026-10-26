@@ -14,6 +14,8 @@
     const face = new FontFace(family, `url("${chrome.runtime.getURL(path)}")`, { weight, display: 'swap' });
     document.fonts.add(face);
   }
+  let sectionPreferences = {};
+  const sectionReady = chrome.storage.local.get('cardSections').then(values => { sectionPreferences = TickerView.cardSections(values.cardSections); }).catch(() => {});
   let valuationScenarios = {};
   let settings = defaults, watchlist = [], active = false, pinned = false;
   let hoverTimer, hideTimer, scanJob, refreshTimer, anchor, state, generation = 0, chartGeneration = 0;
@@ -230,6 +232,7 @@
   async function openTicker(input, target, keyboard = false, canonical = false, source = input) {
     let ticker;
     try { ticker = canonical ? TickerView.normalizeSymbol(input) : TickerView.resolveSymbol(input); } catch { return; }
+    await sectionReady;
     if (!await mayLeave()) return;
     clearTimeout(hoverTimer); clearTimeout(hideTimer);
     pinned = false; anchor = target; chartIdentity = null;
@@ -374,6 +377,13 @@
     if (!event.target.matches('.tv-valuation-form')) return;
     event.preventDefault(); void saveValuation();
   });
+  function applySectionPreferences() {
+    for (const key of TickerView.cardSectionKeys) {
+      const section = modal.querySelector(`details.tv-${key}`);
+      if (key === 'note' && (noteDirty() || leavePending)) continue;
+      if (section && Object.hasOwn(sectionPreferences, key)) section.open = sectionPreferences[key];
+    }
+  }
   function shell() {
     setHTML(modal, `
       <div class="tv-chrome">
@@ -395,6 +405,20 @@
       <details class="tv-news"><summary>News and sentiment</summary><div class="tv-news-body"></div></details>
       <details class="tv-guide"><summary>Indicator guide</summary><p>RS compares session returns in percentage points, only for matching market dates. Volume / avg day compares current session volume with the prior 50 full sessions; it is not time-of-day RVOL. ATR uses Wilder smoothing. VWAP is a close × volume estimate from five-minute regular-session bars. Daily indicators combine cached history with the current intraday session when available. History and profile retrieval times appear on the card. Sentiment uses headline keywords, ignores articles older than 48 hours, and fades toward neutral with age.</p></details>
       <div class="tv-messages" role="status"></div><nav class="tv-research-dock" aria-label="Research links"></nav>`);
+    applySectionPreferences();
+    for (const key of TickerView.cardSectionKeys) {
+      const section = modal.querySelector(`details.tv-${key}`);
+      section?.querySelector('summary').addEventListener('click', () => {
+        setTimeout(() => {
+          if (!section.isConnected) return;
+          sectionPreferences[key] = section.open;
+          void request('setCardSection', { section: key, open: section.open }).catch(error => {
+            const status = modal.querySelector('.tv-messages');
+            if (status) status.textContent = error.message;
+          });
+        }, 0);
+      });
+    }
     render();
   }
   function render() {
@@ -591,6 +615,7 @@
         renderNote();
       }
     }
+    if (changes.cardSections) { sectionPreferences = TickerView.cardSections(changes.cardSections.newValue); applySectionPreferences(); }
     if (changes.valuationScenarios) { valuationScenarios = changes.valuationScenarios.newValue || {}; if (state) renderValuation(state.quote); }
     if (changes.settings) { settings = TickerView.settings(changes.settings.newValue); applySettings(); }
     if (changes.watchlist) { watchlist = changes.watchlist.newValue || []; if (state) render(); }

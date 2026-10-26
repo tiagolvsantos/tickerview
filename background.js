@@ -53,10 +53,14 @@ async function base(symbol, remember = true, ttl = 60000) {
 }
 async function tech(symbol) {
   const history = await daily(symbol);
+  if (normalizeSymbol(history.value.meta?.symbol) !== symbol) throw new Error('Provider returned a different symbol');
   // Reuse the fast request if it is already in progress; don't let its failure discard history.
   let live, intradayResult;
   try { intradayResult = (await intra(symbol)).value; live = priceData(intradayResult); } catch { live = priceData(history.value); }
-  return { quote: technicals(history.value, live, intradayResult), sessionDate: live.sessionDate, status: status(history) };
+  if (normalizeSymbol(live.symbol) !== symbol) throw new Error('Provider returned a different symbol');
+  const result = { quote: technicals(history.value, live, intradayResult), sessionDate: live.sessionDate, status: status(history) };
+  await rememberQuickIndicators(symbol, live, { rsi: result.quote.rsi, ytdVwap: result.quote.ytdVwap, sessionDate: live.sessionDate, fetchedAt: history.time, stale: history.stale === true, error: history.error || null }).catch(() => {});
+  return result;
 }
 async function fundamentals(symbol) {
   // The direct summary API requires authentication. The public statistics page
@@ -110,16 +114,26 @@ function editStorage(work) {
 function quoteSnapshot(symbol, quote, source) {
   return { symbol, name: quote.longName || symbol, price: quote.regularMarketPrice,
     change: quote.regularMarketChange, changePercent: quote.regularMarketChangePercent, currency: quote.currency || '', quoteTime: quote.quoteTime,
-    fetchedAt: source.fetchedAt, stale: source.stale, fallback: source.fallback === true, marketState: quote.marketState };
+    sessionDate: quote.sessionDate, fetchedAt: source.fetchedAt, stale: source.stale, fallback: source.fallback === true, marketState: quote.marketState };
 }
 async function rememberQuote(symbol, quote, source) {
   if (!Number.isFinite(quote.regularMarketPrice)) return;
   await editStorage(async () => {
     const { quoteSnapshots = {} } = await chrome.storage.local.get('quoteSnapshots');
     const next = { ...quoteSnapshots }; delete next[symbol]; next[symbol] = quoteSnapshot(symbol, quote, source);
+    const prior = quoteSnapshots[symbol];
+    if (prior?.quoteTime === quote.quoteTime && prior.sessionDate === quote.sessionDate && prior.quickIndicators) next[symbol].quickIndicators = prior.quickIndicators;
     const keys = Object.keys(next);
     for (const key of keys.slice(0, Math.max(0, keys.length - 100))) delete next[key];
     await chrome.storage.local.set({ quoteSnapshots: next });
+  });
+}
+async function rememberQuickIndicators(symbol, live, indicators) {
+  await editStorage(async () => {
+    const { quoteSnapshots = {} } = await chrome.storage.local.get('quoteSnapshots');
+    const snapshot = quoteSnapshots[symbol];
+    if (!snapshot || snapshot.quoteTime !== live.quoteTime || snapshot.sessionDate !== live.sessionDate) return;
+    await chrome.storage.local.set({ quoteSnapshots: { ...quoteSnapshots, [symbol]: { ...snapshot, quickIndicators: indicators } } });
   });
 }
 async function library() {
@@ -160,19 +174,27 @@ function drainQuotes() {
   }
 }
 const refreshTasks = new Map();
-async function refreshQuotes(kind, force = false) {
-  if (refreshTasks.has(kind)) return refreshTasks.get(kind);
+async function refreshQuotes(kind, force = false, requestedSymbols) {
+  const taskKey = requestedSymbols ? `${kind}:${JSON.stringify([...requestedSymbols].sort())}` : kind;
+  if (refreshTasks.has(taskKey)) return refreshTasks.get(taskKey);
   const task = (async () => {
     const { watchlist } = await library();
     const watched = new Set(watchlist);
     const { dashboardPreferences: storedPreferences } = await chrome.storage.local.get('dashboardPreferences');
     const preferences = TickerView.dashboardPreferences(storedPreferences);
     const ttl = force ? 0 : kind === 'dashboard' && preferences.autoRefresh ? preferences.refreshInterval * 1000 : 60000;
-    const symbols = kind === 'overview' ? [...TickerView.overviewSymbols] : kind === 'dashboard' ? [...new Set([...TickerView.overviewSymbols, ...watchlist])] : watchlist;
+    const available = kind === 'overview' ? [...TickerView.overviewSymbols] : kind === 'dashboard' ? [...new Set([...TickerView.overviewSymbols, ...watchlist])] : watchlist;
+    const symbols = requestedSymbols ? available.filter(symbol => requestedSymbols.includes(symbol)) : available;
     const outcomes = {};
     await Promise.all(symbols.map(symbol => queuedQuote(async () => {
       try {
         const result = await base(symbol, watched.has(symbol), ttl);
+        if (kind !== 'overview' && watched.has(symbol)) {
+          try { await tech(symbol); }
+          catch (error) {
+            await rememberQuickIndicators(symbol, result.quote, { rsi: null, ytdVwap: null, sessionDate: result.quote.sessionDate, error: error.message }).catch(() => {});
+          }
+        }
         outcomes[symbol] = { stale: result.status.stale, error: result.status.error || (result.status.fallback ? 'Daily quote fallback' : null) };
         if (TickerView.overviewSymbols.includes(symbol)) await editStorage(async () => {
           const { marketOverview = {} } = await chrome.storage.local.get('marketOverview');
@@ -183,11 +205,17 @@ async function refreshQuotes(kind, force = false) {
     })));
     const { marketOverview = {} } = await chrome.storage.local.get('marketOverview');
     return { outcomes, marketOverview };
-  })().finally(() => { refreshTasks.delete(kind); });
-  refreshTasks.set(kind, task); return task;
+  })().finally(() => { refreshTasks.delete(taskKey); });
+  refreshTasks.set(taskKey, task); return task;
 }
 async function handle(request) {
   switch (request.action) {
+    case 'setCardSection': return editStorage(async () => {
+      if (!TickerView.cardSectionKeys.includes(request.section) || typeof request.open !== 'boolean') throw new Error('Invalid card section preference');
+      const { cardSections = {} } = await chrome.storage.local.get('cardSections');
+      const next = { ...TickerView.cardSections(cardSections), [request.section]: request.open };
+      await chrome.storage.local.set({ cardSections: next }); return { cardSections: next };
+    });
     case 'library': return library();
     case 'exportBackup': {
       await library();
@@ -203,7 +231,14 @@ async function handle(request) {
       return { summary };
     });
     case 'refreshWatchlist': return refreshQuotes('watchlist');
-    case 'refreshDashboard': return refreshQuotes('dashboard', request.force === true);
+    case 'refreshDashboard': {
+      let symbols;
+      if (request.symbols !== undefined) {
+        if (!Array.isArray(request.symbols) || !request.symbols.length || request.symbols.length > 104) throw new Error('Invalid refresh symbols');
+        symbols = [...new Set(request.symbols.map(normalizeSymbol))];
+      }
+      return refreshQuotes('dashboard', request.force === true, symbols);
+    }
     case 'overview': return refreshQuotes('overview');
     case 'setDashboardPreferences': return editStorage(async () => {
       const { dashboardPreferences = {} } = await chrome.storage.local.get('dashboardPreferences');
@@ -308,14 +343,29 @@ async function handle(request) {
       await chrome.storage.local.set({ settings: TickerView.settings(next) });
       return {};
     });
+    case 'moveWatch': return editStorage(async () => {
+      const symbol = normalizeSymbol(request.ticker), target = normalizeSymbol(request.target);
+      if (!['before', 'after'].includes(request.position)) throw new Error('Invalid watchlist move');
+      const { watchlist: stored } = await chrome.storage.local.get('watchlist');
+      const watchlist = TickerView.cleanSymbols(stored);
+      if (!watchlist.includes(symbol) || !watchlist.includes(target)) throw new Error('Watchlist changed. Try moving the symbol again.');
+      if (symbol !== target) {
+        watchlist.splice(watchlist.indexOf(symbol), 1);
+        watchlist.splice(watchlist.indexOf(target) + (request.position === 'after' ? 1 : 0), 0, symbol);
+      }
+      await chrome.storage.local.set({ watchlist, watchSort: 'saved' });
+      return { watchlist };
+    });
     case 'watch': return editStorage(async () => {
       const symbol = normalizeSymbol(request.ticker);
+      if (request.index !== undefined && (!Number.isInteger(request.index) || request.index < 0 || request.index >= 100 || request.saved !== true)) throw new Error('Invalid watchlist insertion index');
       const stored = await chrome.storage.local.get('watchlist');
       const watchlist = TickerView.cleanSymbols(stored.watchlist);
       const saved = watchlist.includes(symbol);
       const wanted = typeof request.saved === 'boolean' ? request.saved : !saved;
       if (wanted && !saved && watchlist.length >= 100) throw new Error('Watchlist limit is 100 symbols');
       const next = wanted ? saved ? watchlist : [symbol, ...watchlist] : watchlist.filter(x => x !== symbol);
+      if (wanted && !saved && request.index !== undefined) { next.shift(); next.splice(Math.min(request.index, next.length), 0, symbol); }
       await chrome.storage.local.set({ watchlist: next });
       return { watchlist: next };
     });
