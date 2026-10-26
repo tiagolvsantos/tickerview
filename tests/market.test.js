@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSymbol, sessionDate, bars, priceData, technicals, benchmark, sentiment, profileData, rsi } from '../market.js';
+import { normalizeSymbol, sessionDate, bars, priceData, technicals, benchmark, sentiment, profileData, rsi, anchoredYtdVwap } from '../market.js';
 const ts = text => Date.parse(text) / 1000;
 function fixture() {
   return { meta: { symbol: 'AAPL', regularMarketPrice: 110, previousClose: 100,
@@ -95,4 +95,32 @@ test('symbol validation rejects historical currency matches but retains numeric 
   for (const symbol of ['5B', '500M', '5.8B', '$39B']) assert.throws(() => normalizeSymbol(symbol));
   assert.equal(normalizeSymbol('0700.HK'), '0700.HK');
   assert.equal(normalizeSymbol('ES=F'), 'ES=F');
+});
+
+test('YTD VWAP anchors exchange-local year, weights positive volume, and excludes future sessions', () => {
+  const point = (date, close, volume) => ({ time: ts(date), close, volume });
+  const points = [
+    point('2026-01-01T00:30Z', 999, 10000), // Still December 31 in New York.
+    point('2026-01-02T15:00Z', 10, 100),
+    point('2026-01-05T15:00Z', 20, 300),
+    point('2026-01-06T15:00Z', 100, 0),
+    point('2026-01-07T15:00Z', 100, null),
+    point('2026-01-08T15:00Z', 100, -1),
+    point('2026-01-09T15:00Z', NaN, 50),
+    point('2026-01-12T15:00Z', 999, 10000)
+  ];
+  assert.equal(anchoredYtdVwap(points, '2026-01-09'), 17.5);
+  assert.equal(anchoredYtdVwap(points, '2026-01-01'), null);
+  assert.equal(anchoredYtdVwap([], '2026-01-09'), null);
+  assert.equal(anchoredYtdVwap(points, null), null);
+  assert.equal(anchoredYtdVwap([point('2025-12-31T15:00Z', 50, 20)], '2025-12-31'), 50);
+});
+test('YTD VWAP replaces current daily candle with fresh partial-session data without double counting', () => {
+  const history = fixture(), intraday = fixture();
+  intraday.meta.regularMarketPrice = 120; intraday.meta.regularMarketVolume = 50;
+  const result = technicals(history, priceData(intraday), intraday);
+  assert.equal(result.ytdVwap, (90 * 100 + 100 * 100 + 120 * 50) / 250);
+  assert.equal(result.rsi, null);
+  intraday.meta.regularMarketVolume = 0;
+  assert.equal(technicals(history, priceData(intraday), intraday).ytdVwap, 95);
 });

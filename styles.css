@@ -98,3 +98,26 @@ html body a.tickerview-highlight[data-tv-link]:is(:hover, :focus-visible) {
 @media (max-width: 400px) { #tickerview-modal .tv-stats-grid { grid-template-columns: 1fr 1fr; } }
 
 #tickerview-modal .tv-missing { color: var(--tv-dim); font: 9px/1.7 var(--tv-mono); }
+
+#tickerview-modal .tv-valuation-note { color: var(--tv-muted); font: 10px/1.6 var(--tv-sans); margin: 8px 0; }
+#tickerview-modal .tv-value-track { height: 3px; position: relative; margin: 18px 5px; background: var(--tv-accent); }
+#tickerview-modal .tv-value-track span { position: absolute; top: -3px; width: 3px; height: 9px; background: var(--tv-accent); border: 1px solid var(--tv-bg); }
+#tickerview-modal .tv-value-track .tv-value-current { background: var(--tv-bright); height: 13px; top: -5px; width: 5px; }
+#tickerview-modal .tv-value-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--tv-border); padding: 1px; }
+#tickerview-modal .tv-value-cells > div { display: flex; flex-direction: column; gap: 5px; padding: 8px 5px; background: var(--tv-panel); min-width: 0; overflow-wrap: anywhere; }
+#tickerview-modal .tv-value-cells span, #tickerview-modal .tv-value-cells small { font: 9px/1.5 var(--tv-sans); color: var(--tv-muted); }
+#tickerview-modal .tv-value-cells strong { font: 11px/1.5 var(--tv-mono); color: var(--tv-bright); }
+#tickerview-modal .tv-analyst-comparison { margin-top: 14px; font: 10px/1.6 var(--tv-sans); }
+#tickerview-modal .tv-valuation-inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+#tickerview-modal .tv-valuation-inputs label { font: 10px/1.6 var(--tv-sans); color: var(--tv-muted); }
+#tickerview-modal .tv-valuation-inputs input { box-sizing: border-box; display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid var(--tv-border); border-radius: 2px; background: var(--tv-panel); color: var(--tv-bright); font: 12px var(--tv-mono); }
+#tickerview-modal .tv-valuation-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+#tickerview-modal .tv-valuation-feedback { color: var(--tv-accent); font: 10px/1.6 var(--tv-sans); }
+#tickerview-modal .tv-assumptions { margin-top: 10px; }
+
+#tickerview-modal .tv-note { margin: 10px 0; padding: 8px; border: 1px solid var(--tv-border); background: var(--tv-panel); }
+#tickerview-modal .tv-note label { display: block; margin: 8px 0 4px; font-size: 10px; }
+#tickerview-modal .tv-note textarea { box-sizing: border-box; display: block; width: 100%; resize: vertical; min-height: 80px; max-height: 240px; padding: 8px; border: 1px solid var(--tv-border-strong); background: var(--tv-control); color: var(--tv-text); font: 11px/1.5 var(--tv-mono); margin-bottom: 8px; }
+#tickerview-modal .tv-note-status { font-size: 10px; color: var(--tv-muted); }
+#tickerview-modal .tv-note-prompt { padding: 8px; border: 1px solid var(--tv-accent); }
+#tickerview-modal .tv-note [hidden] { display: none; }

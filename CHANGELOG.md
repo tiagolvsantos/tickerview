@@ -2,16 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-10-26
+
+Minor release adding watchlist indicators, manual ordering, faster controls, and clearer market-window layouts.
+
+### Added
+
+- Daily RSI (14), estimated YTD anchored VWAP, and a Δ VWAP column showing percentage and absolute price distance with directional colors. Indicator history failures leave successful quotes usable; missing and stale data stay labeled.
+- Column descriptions on hover and keyboard focus, including formulas, quote-currency units, source context, and estimate limitations.
+- Drag-and-drop watchlist reordering with keyboard Up/Down controls, visible drop markers, and immediate local persistence in Saved order.
+- Collapsible Add symbol form, local symbol/company filtering, and Undo for the latest watchlist removal.
+- `/` to focus the watchlist filter and Escape to clear it; targeted Retry quotes for unavailable, stale, or failed dashboard symbols through the existing queue and cooldowns.
+- Saved-note indicators on watchlist rows and remembered card-section expansion across tickers and tabs, preserving note drafts and leave prompts. Section preferences remain local and are excluded from backups.
+- Wider watchlist spacing, horizontal scrolling for indicator columns in narrow windows, and a recent-tickers sidebar in large market windows.
+
+### Changed
+
+- Lead daily change with percentage above the absolute amount, render currencies more quietly, and consolidate refresh progress, failures, and freshness into one status area.
+- Refresh the repository screenshots and promotional PNG/SVG tiles with deterministic demo data; add dedicated reordering and column-description images and update the README gallery and generators.
+- Align the extension manifest, package, lockfile, and displayed version at 2.2.0.
+
+## [2.1.1] - 2026-10-24
+
+### Fixed
+
+- Cache the logo URL at startup so extension reloads cannot interrupt card replacement and leave a previous ticker or empty border visible; disconnected cards show a page-refresh message.
+- Render stock cards through a scoped Trusted Types policy so enforcing host pages do not leave an empty card border.
+- Capture ticker hover events before host handlers intercept them and read the current cashtag text when opening a card.
+
+### Added
+
+- Project-specific `AGENTS.md` covering extension architecture, behavior, privacy, validation, and Conventional Commits.
+
+## [2.1.0] - 2026-10-23
+
+Minor release adding market overview, configurable refresh, portable backups, ticker aliases, personal notes, and clearer settings.
+
+### Added
+- Reorganized gear settings into Market, Cards, Aliases, and Backup tabs with keyboard navigation. Auto-refresh is immediately visible on the default Market tab with an On/Off switch, interval, and status; the main countdown/“Auto off · Enable” button opens it directly. Separated website highlighting from quote refresh controls.
+- Compact SPY, QQQ, VIX, and BTC market overview with canonical card links, shared cached requests, partial-failure handling, and a shared three-request refresh queue.
+- Clickable Symbol, Price, and Change column headers with ascending/descending sorting and accessible sort states; moved the sort dropdown into gear settings.
+- Retrieval-age freshness indicator, circular-arrow manual refresh button with a loading animation, and a live countdown. Automatic refresh defaults to 15 seconds, supports configurable 15/30-second or 1/2/5-minute intervals, pauses while hidden, and avoids overlapping refreshes. Dashboard cache freshness follows the configured interval; manual refresh requests fresh data while preserving failure cooldowns.
+- Content-fitted initial window, remembered manual dimensions, and Fit to content / Full height controls; market preferences travel in backups while window bounds stay local, with older backups still supported.
+- Show daily price change in quote-currency amount alongside percentage change in the watchlist table, with directional colors and preserved zero values.
+- Market-first extension window with aligned Symbol/company, Price, and Change watchlist columns. Centralized extension controls, appearance, indicators, aliases, and export/import in an accessible gear-button settings dialog.
+- Export/import JSON backups covering settings, watchlists, recents, sort order, custom aliases, notes, and valuation assumptions, with a preview, Merge/Replace choices, strict validation, and offline restores that preserve open drafts. Quotes and caches are excluded.
+- Direct ticker/alias search and configurable Alt+Shift+T shortcut; reuse the existing window without reloading or losing drafts.
+- Built-in Yahoo aliases for common indices and BTC/ETH, plus provider-verified local custom overrides and reset controls. Canonical symbols share saved data; alias changes never redirect existing saved instruments.
+- Resolve aliases when hovering or keyboard-opening cashtags, searching, and manually adding watchlist symbols, including `$VIX` → `^VIX`, `$BTC` → `BTC-USD`, `$ETH` → `ETH-USD`, and `$SPX` → `^GSPC`. Preserve original page text and native link destinations while showing the resolved symbol in the card.
+- Apply custom alias changes to already-open pages without requiring a page refresh.
+- Watchlist quote refresh with three-request concurrency, progress and partial failure labels, plus persistent symbol/company/daily-change sorting.
+- Local per-ticker notes with explicit saves, draft protection, revision conflicts, deletion, and bounded storage.
+- Canonical Yahoo research links and instrument-appropriate index/crypto fundamentals messaging.
+
 ## [2.0.0] - 2026-10-23
 
 Major release introducing the Cerberus redesign, expanded market data, and X Pro / OldTweetDeck support.
 
 ### Changed
-- Replaced the repository screenshots with six 1280 × 800 feature images covering the stock card, watchlist, fundamentals, controls, news and research, and TweetDeck highlighting; refreshed the README gallery and reproducible screenshot generator.
+- Replaced the repository screenshots with seven 1280 × 800 feature images covering the stock card, watchlist, fundamentals, controls, news and research, TweetDeck highlighting, and valuation scenarios; refreshed the README gallery and reproducible screenshot generator.
 - Bumped the Chrome manifest, popup, and development package versions to 2.0.0.
 - Keep Node.js and npm limited to development tools; the extension runs directly in Chrome without a build step.
 
 ### Added
+- Clicking the toolbar icon now directly opens a resizable window fitted to the available screen height, bypassing Chrome’s 600-pixel toolbar-panel limit. The original website context is retained, and watchlists and recent symbols use the extra height.
+- Value estimate panel with editable EPS × P/E bear/base/bull scenarios, quote comparisons, locally saved assumptions for up to 100 stocks, and separate analyst targets. Defaults are explicitly illustrative; ineligible instruments and currency mismatches show an explanation.
 - Expanded Fundamentals section with valuation multiples, EPS, revenue, growth, margins, return on equity, cash flow, cash, and debt; reporting currency is shown separately from the stock quote currency.
 - Reorganized popup with master/site switches, collapsible appearance controls, indicator presets and groups, cached company/price watchlist rows, inline symbol validation, direct popup cards, recent-symbol saving, and Clear history.
 - Cerberus Terminal branding: original three-headed logo in all Chrome icon sizes, navy/silver/orange theme, bundled Montserrat and IBM Plex Mono fonts, and redesigned popup and stock card.
@@ -29,6 +84,7 @@ Major release introducing the Cerberus redesign, expanded market data, and X Pro
 - Pause quote refresh in hidden tabs and avoid duplicate scanning inside embedded frames.
 
 ### Fixed
+- Retain the analyst recommendation label and original colored low/mean/high/current-price target graphic alongside the earnings valuation scenarios.
 - Keep native TweetDeck cashtag links and their nested dollar-sign/ticker spans orange when host link styles override their color.
 - Detect split-span cashtag links in X Pro / OldTweetDeck without replacing their markup, handle recycled rows and body replacement, and retain pinned cards during column scrolling.
 - Clean legacy currency false positives from saved/recent symbols and preserve focus when cached watchlist rows update.

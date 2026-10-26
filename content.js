@@ -3,6 +3,8 @@
   const popup = document.body.classList.contains('tv-popup');
   const inertElements = new Map();
   const linkAttributes = new WeakMap();
+  // Resolve bundled assets while this content script still has a valid runtime.
+  const logoURL = chrome.runtime.getURL('icons/icon128.png');
   // Local branded typefaces, registered only in the current document. Their unique
   // family names avoid replacing the host site's fonts; Chrome loads them on use.
   for (const [family, path, weight] of popup ? [] : [
@@ -12,6 +14,9 @@
     const face = new FontFace(family, `url("${chrome.runtime.getURL(path)}")`, { weight, display: 'swap' });
     document.fonts.add(face);
   }
+  let sectionPreferences = {};
+  const sectionReady = chrome.storage.local.get('cardSections').then(values => { sectionPreferences = TickerView.cardSections(values.cardSections); }).catch(() => {});
+  let valuationScenarios = {};
   let settings = defaults, watchlist = [], active = false, pinned = false;
   let hoverTimer, hideTimer, scanJob, refreshTimer, anchor, state, generation = 0, chartGeneration = 0;
   let pending = new Set(), traversal = null;
@@ -28,6 +33,10 @@
   const number = (value, suffix = '', digits = 2) => typeof value === 'number' && Number.isFinite(value) ? `${value.toLocaleString(undefined, { maximumFractionDigits: digits })}${suffix}` : 'N/A';
   const compactNumber = value => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 }).format(value) : 'N/A';
   const safeURL = value => { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? escape(u.href) : ''; } catch { return ''; } };
+  // Some host pages enforce Trusted Types even for extension DOM sinks.
+  // Only pass extension templates with escaped provider/user text to this policy.
+  const htmlPolicy = globalThis.trustedTypes?.createPolicy('tickerview-card', { createHTML: html => html });
+  const setHTML = (element, html) => { element.innerHTML = htmlPolicy ? htmlPolicy.createHTML(html) : html; };
   const request = async (action, extra = {}) => {
     try {
       const result = await chrome.runtime.sendMessage({ action, ...extra });
@@ -162,29 +171,120 @@
     const top = rect.bottom + height + 10 <= innerHeight ? rect.bottom + 8 : rect.top - height - 8;
     modal.style.top = `${Math.max(8, Math.min(top, innerHeight - height - 8))}px`;
   }
-  function close() {
+  function closeNow() {
     generation++; chartGeneration++; clearTimeout(refreshTimer); clearTimeout(hoverTimer); clearTimeout(hideTimer);
     const returnFocus = modal.contains(document.activeElement), ticker = state?.ticker;
-    modal.hidden = true; pinned = false; state = null;
+    modal.hidden = true; pinned = false; state = null; noteState = null;
     for (const [element, value] of inertElements) element.inert = value;
     inertElements.clear();
     const button = anchor?.isConnected ? anchor : popup ? [...document.querySelectorAll('[data-open-ticker]')].find(node => node.dataset.openTicker === ticker) : null; anchor = null;
     if (returnFocus && button?.isConnected) button.focus({ preventScroll: true });
+    if (popup) document.dispatchEvent(new CustomEvent('tickerview:closed'));
   }
+  let noteState = null, leavePending = null;
+  const noteDirty = () => noteState && noteState.text !== noteState.saved;
+  function renderNote() {
+    const box = modal.querySelector('.tv-note');
+    if (!box || !noteState) return;
+    const input = box.querySelector('textarea');
+    if (input.value !== noteState.text) input.value = noteState.text;
+    input.disabled = !noteState.ready || noteState.saving;
+    box.querySelector('[data-action="note-save"]').disabled = !noteState.ready || noteState.saving;
+    box.querySelector('.tv-note-status').textContent = noteState.message || (noteDirty() ? 'Unsaved changes' : noteState.saved ? 'Saved locally' : 'Local only · 4,000 characters maximum');
+    box.querySelector('.tv-note-conflict').hidden = !noteState.conflict;
+  }
+  async function readNote(ticker) {
+    const current = noteState;
+    try {
+      const result = await request('getNote', { ticker });
+      if (noteState !== current) return;
+      const note = result.note || { text: '', revision: null };
+      Object.assign(current, { text: note.text, saved: note.text, revision: note.revision, ready: true }); renderNote();
+    } catch (error) { if (noteState === current) { current.message = error.message; renderNote(); } }
+  }
+  async function saveNote(overwrite = false) {
+    const current = noteState, ticker = state?.ticker;
+    if (!current?.ready || current.saving) return false;
+    current.saving = true; current.message = 'Saving…'; renderNote();
+    try {
+      const revision = overwrite && current.conflict ? current.remote.revision : current.revision;
+      const result = await request('saveNote', { ticker, text: current.text, revision });
+      if (noteState !== current) return false;
+      if (result.conflict) {
+        current.conflict = true; current.remote = result.note; current.message = 'This note changed in another window. Reload it or explicitly overwrite it.'; return false;
+      }
+      current.saved = current.text; current.revision = result.note.revision; current.conflict = false; current.message = 'Saved locally'; return true;
+    } catch (error) { current.message = error.message; return false; }
+    finally { current.saving = false; if (noteState === current) renderNote(); }
+  }
+  async function mayLeave() {
+    if (!noteDirty()) return !noteState?.saving;
+    if (leavePending) return false;
+    const prompt = modal.querySelector('.tv-note-prompt'); prompt.hidden = false;
+    modal.querySelector('.tv-note').open = true;
+    prompt.querySelector('button').focus();
+    return new Promise(resolve => { leavePending = resolve; });
+  }
+  async function close(after) {
+    if (!await mayLeave()) return;
+    closeNow(); if (typeof after === 'function') after();
+  }
+  async function openTicker(input, target, keyboard = false, canonical = false, source = input) {
+    let ticker;
+    try { ticker = canonical ? TickerView.normalizeSymbol(input) : TickerView.resolveSymbol(input); } catch { return; }
+    await sectionReady;
+    if (!await mayLeave()) return;
+    clearTimeout(hoverTimer); clearTimeout(hideTimer);
+    pinned = false; anchor = target; chartIdentity = null;
+    void load(ticker, true, source);
+    position(); pinned = keyboard || popup;
+    const button = modal.querySelector('[data-action="pin"]');
+    button.textContent = pinned ? 'Unpin' : 'Pin'; button.setAttribute('aria-pressed', String(pinned));
+    if (popup) {
+      modal.setAttribute('aria-modal', 'true');
+      for (const element of document.body.children) if (element !== modal && !inertElements.has(element)) { inertElements.set(element, element.inert); element.inert = true; }
+    }
+    if (keyboard || popup) modal.querySelector('[data-action="close"]').focus();
+  }
+  modal.addEventListener('input', event => {
+    if (!event.target.matches('.tv-note textarea') || !noteState) return;
+    noteState.text = event.target.value; noteState.message = ''; pinned = true;
+    const pin = modal.querySelector('[data-action="pin"]'); pin.textContent = 'Unpin'; pin.setAttribute('aria-pressed', 'true'); renderNote();
+  });
+  modal.addEventListener('click', async event => {
+    const action = event.target.closest('button')?.dataset.action;
+    if (action === 'note-save' || action === 'note-overwrite') { await saveNote(action === 'note-overwrite'); return; }
+    if (action === 'note-reload' && noteState?.remote) {
+      const remote = noteState.remote;
+      Object.assign(noteState, { text: remote.text, saved: remote.text, revision: remote.revision, conflict: false, message: 'Reloaded saved note' }); renderNote(); return;
+    }
+    if (!['note-leave-save', 'note-discard', 'note-cancel'].includes(action) || !leavePending) return;
+    if (action === 'note-leave-save' && !await saveNote()) {
+      const resolve = leavePending; leavePending = null; modal.querySelector('.tv-note-prompt').hidden = true; modal.querySelector(noteState.conflict ? '[data-action="note-reload"]' : '.tv-note textarea').focus(); resolve(false); return;
+    }
+    const resolve = leavePending; leavePending = null; modal.querySelector('.tv-note-prompt').hidden = true;
+    if (action === 'note-discard') { noteState.text = noteState.saved; renderNote(); }
+    if (action === 'note-cancel') modal.querySelector('.tv-note textarea').focus();
+    resolve(action !== 'note-cancel');
+  });
+  if (popup) document.addEventListener('tickerview:close', event => void close(event.detail?.after));
+  window.addEventListener('beforeunload', event => { if (noteDirty()) { event.preventDefault(); event.returnValue = ''; } });
   function hideLater(delay = 300) {
     clearTimeout(hoverTimer); clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { if (!pinned && !modal.matches(':hover') && !modal.contains(document.activeElement)) close(); }, delay);
+    hideTimer = setTimeout(() => { if (!noteDirty() && !pinned && !modal.matches(':hover') && !modal.contains(document.activeElement)) close(); }, delay);
   }
   function scheduleRefresh() {
     clearTimeout(refreshTimer);
     if (!modal.hidden && !document.hidden) refreshTimer = setTimeout(() => { if (state) void load(state.ticker, false); }, 60000);
   }
-  async function load(ticker, fresh = true) {
+  async function load(ticker, fresh = true, source = ticker) {
     const id = ++generation;
     if (fresh) {
       chartGeneration++;
-      state = { ticker, quote: {}, range: '1D', chart: null, loading: new Set(['base', 'technicals', 'details']), errors: {}, statuses: {}, issues: [] };
+      noteState = { text: '', saved: '', revision: null, ready: false, saving: false };
+      state = { ticker, source, quote: {}, range: '1D', chart: null, loading: new Set(['base', 'technicals', 'details']), errors: {}, statuses: {}, issues: [] };
       modal.hidden = false; shell();
+      void readNote(ticker);
       void request('recent', { ticker }).catch(() => {});
     } else { state.loading = new Set(['base', 'technicals', 'details']); state.errors = {}; }
     const same = () => id === generation && state?.ticker === ticker && !modal.hidden;
@@ -208,18 +308,117 @@
     }));
     if (same()) scheduleRefresh();
   }
+  function savedAssumptions(ticker) {
+    try { return TickerView.valuationAssumptions(valuationScenarios[ticker]); }
+    catch { return { ...TickerView.valuationDefaults }; }
+  }
+  function renderValuation(q) {
+    const assumptions = savedAssumptions(state.ticker);
+    const form = modal.querySelector('.tv-valuation-form');
+    if (!state.valuationDirty) for (const key of ['bear', 'base', 'bull']) form.elements[key].value = assumptions[key];
+    const model = TickerView.valuation(q, assumptions);
+    const price = value => `${escape(q.currency || '')} ${number(value)}`;
+    const delta = value => value == null ? 'Comparison unavailable' : `${value > 0 ? '+' : ''}${number(value, '%')} vs quote`;
+    let html = '<p class="tv-valuation-note">EPS × assumed P/E · scenario estimates, not a price forecast.</p>';
+    const saved = Object.hasOwn(valuationScenarios, state.ticker);
+    html += `<p class="tv-valuation-note">${saved ? 'Your saved assumptions' : 'Illustrative examples: 15× / 20× / 25× for every stock; not stock-specific fair multiples.'}</p>`;
+    if (model.scenarios.length) {
+      const values = [...model.scenarios.map(item => item.value), q.regularMarketPrice];
+      const min = Math.min(...values), max = Math.max(...values), span = max - min || Math.max(1, max * .1);
+      const pos = value => 5 + (value - min) / span * 90;
+      html += `<div class="tv-value-track" role="img" aria-label="Earnings scenario range and current quote">${model.scenarios.map(item => `<span style="left:${pos(item.value)}%" title="${item.key}: ${price(item.value)}"></span>`).join('')}<span class="tv-value-current" style="left:${pos(q.regularMarketPrice)}%" title="Current quote: ${price(q.regularMarketPrice)}"></span></div>`;
+      html += `<div class="tv-value-cells">${model.scenarios.map(item => `<div data-scenario="${item.key}"><span>${item.key[0].toUpperCase() + item.key.slice(1)} · ${number(item.multiple)}×</span><strong>${price(item.value)}</strong><small>${delta(item.difference)}</small></div>`).join('')}</div>`;
+      const base = model.scenarios[1].value, gap = (q.regularMarketPrice / base - 1) * 100;
+      html += `<p class="tv-valuation-note">Quote ${price(q.regularMarketPrice)} is ${number(Math.abs(gap), '%')} ${gap >= 0 ? 'above' : 'below'} the base estimate. EPS (TTM): ${price(q.fundamentals.trailingEps)}.</p>`;
+    } else html += `<p class="tv-valuation-note">${state.loading.has('base') || state.loading.has('details') ? 'Loading value estimate…' : escape(model.reason)}</p>`;
+    html += '<div class="tv-analyst-comparison"><strong>Analyst targets · separate provider opinions</strong>';
+    if (model.targets.length) {
+      const ratings = { strong_buy: 'Strong buy', buy: 'Buy', hold: 'Hold', underperform: 'Underperform', sell: 'Sell', strong_sell: 'Strong sell' };
+      const rating = ratings[q.recKey] || (typeof q.recKey === 'string' ? q.recKey.replaceAll('_', ' ') : '');
+      html += `<p class="tv-valuation-note">${Number.isFinite(q.analystCount) ? `${number(q.analystCount, '', 0)} analysts` : 'Analyst count unavailable'}${rating ? ` · ${escape(rating)}` : ''} · snapshot</p>`;
+      if (model.targets.some(item => item.label === 'Low') && model.targets.some(item => item.label === 'High')) {
+        const markers = model.targets.map(item => ({ label: item.label, value: item.value }));
+        if (Number.isFinite(q.regularMarketPrice) && q.regularMarketPrice > 0) markers.push({ label: 'Price', value: q.regularMarketPrice });
+        const min = Math.min(...markers.map(item => item.value)) * .95;
+        const max = Math.max(...markers.map(item => item.value)) * 1.05;
+        const description = markers.map(item => `${item.label}: ${price(item.value)}`).join(' · ');
+        html += `<div class="tv-targets"><div class="tv-target-track" role="img" aria-label="Analyst target range · ${description}">${markers.map(item => `<span style="left:${Math.max(0, Math.min(100, (item.value - min) / (max - min || 1) * 100))}%" title="${item.label}: ${price(item.value)}"></span>`).join('')}</div></div>`;
+      }
+      html += `<div class="tv-value-cells">${model.targets.map(item => `<div data-target="${item.label.toLowerCase()}"><span>${item.label}</span><strong>${price(item.value)}</strong><small>${delta(item.difference)}</small></div>`).join('')}</div>`;
+    } else html += `<p class="tv-valuation-note">${state.loading.has('details') ? 'Loading analyst targets…' : 'Comparable analyst targets are unavailable for this instrument.'}</p>`;
+    html += '</div>';
+    if (state.sources?.profile) html += `<p class="tv-valuation-note">Fundamentals: ${escape(new Date(state.sources.profile.fetchedAt).toLocaleString())}${state.sources.profile.stale ? ' · STALE cache' : ''}</p>`;
+    if (state.statuses.base?.stale || q.quoteTime && Date.now() / 1000 - q.quoteTime > 900) html += '<p class="tv-valuation-note">Quote is cached or more than 15 minutes old; comparisons use the displayed quote.</p>';
+    setHTML(modal.querySelector('.tv-valuation-output'), html);
+  }
+  async function saveValuation(reset = false) {
+    const current = state, form = modal.querySelector('.tv-valuation-form');
+    if (!current || current.valuationSaving) return;
+    const feedback = form.querySelector('.tv-valuation-feedback');
+    try {
+      const assumptions = reset ? null : TickerView.valuationAssumptions(Object.fromEntries(['bear', 'base', 'bull'].map(key => [key, Number(form.elements[key].value)])));
+      current.valuationSaving = true;
+      for (const button of form.querySelectorAll('button')) button.disabled = true;
+      const result = await request(reset ? 'resetValuation' : 'saveValuation', { ticker: current.ticker, assumptions });
+      valuationScenarios = result.valuationScenarios;
+      if (state !== current || modal.hidden) return;
+      current.valuationDirty = false; renderValuation(current.quote);
+      feedback.textContent = reset ? 'Reset to illustrative examples.' : 'Assumptions saved on this browser.';
+    } catch (error) { if (state === current) feedback.textContent = error.message; }
+    finally { current.valuationSaving = false; for (const button of form.querySelectorAll('button')) button.disabled = false; }
+  }
+  modal.addEventListener('input', event => {
+    if (state && event.target.closest('.tv-valuation-form')) {
+      state.valuationDirty = true;
+      modal.querySelector('.tv-valuation-feedback').textContent = 'Unsaved changes. Apply to update the estimates.';
+    }
+  });
+  modal.addEventListener('submit', event => {
+    if (!event.target.matches('.tv-valuation-form')) return;
+    event.preventDefault(); void saveValuation();
+  });
+  function applySectionPreferences() {
+    for (const key of TickerView.cardSectionKeys) {
+      const section = modal.querySelector(`details.tv-${key}`);
+      if (key === 'note' && (noteDirty() || leavePending)) continue;
+      if (section && Object.hasOwn(sectionPreferences, key)) section.open = sectionPreferences[key];
+    }
+  }
   function shell() {
-    modal.innerHTML = `
+    setHTML(modal, `
       <div class="tv-chrome">
-      <div class="tv-brand"><img src="${escape(chrome.runtime.getURL('icons/icon128.png'))}" alt="Cerberus logo" width="32" height="32"><div class="tv-brand-copy"><span class="tv-brand-name">CERBERUS</span><span class="tv-brand-product">TickerView</span></div><span class="tv-brand-tag">MARKET INTELLIGENCE</span></div>
+      <div class="tv-brand"><img src="${escape(logoURL)}" alt="Cerberus logo" width="32" height="32"><div class="tv-brand-copy"><span class="tv-brand-name">CERBERUS</span><span class="tv-brand-product">TickerView</span></div><span class="tv-brand-tag">MARKET INTELLIGENCE</span></div>
       <div class="tv-toolbar"><button type="button" data-action="pin" aria-pressed="false">Pin</button><button type="button" data-action="watch">Save</button><button type="button" data-action="refresh">Refresh</button><button type="button" data-action="close" aria-label="Close stock information">×</button></div></div>
       <div class="tv-summary" aria-live="polite"></div><div class="tv-freshness"></div>
       <div class="tv-timeframes" role="group" aria-label="Chart timeframe">${['1D', '5D', '1M', '6M', '1Y'].map(range => `<button type="button" data-range="${range}" aria-pressed="${range === '1D'}">${range}</button>`).join('')}</div>
       <div class="tv-chart" tabindex="0" role="group" aria-label="Price chart. Use left and right arrow keys to inspect points."></div><div class="tv-chart-readout" aria-live="polite">Loading chart…</div>
-      <div class="tv-stats-grid"></div><details class="tv-fundamentals" open><summary>Fundamentals</summary><div class="tv-fundamentals-body"></div></details><div class="tv-extras"></div>
+      <details class="tv-note"><summary>Personal note</summary><label for="tv-note-text">Your note for this ticker</label><textarea id="tv-note-text" maxlength="4000" rows="4" disabled></textarea>
+      <button type="button" data-action="note-save" disabled>Save note</button><p class="tv-note-status" role="status">Loading note…</p>
+      <div class="tv-note-conflict" hidden><button type="button" data-action="note-reload">Reload saved note</button><button type="button" data-action="note-overwrite">Overwrite saved note</button></div>
+      <div class="tv-note-prompt" role="group" aria-label="Unsaved note" hidden><p>Save your note before leaving?</p><button type="button" data-action="note-leave-save">Save and continue</button><button type="button" data-action="note-discard">Discard</button><button type="button" data-action="note-cancel">Cancel</button></div></details>
+      <div class="tv-stats-grid"></div>
+      <details class="tv-valuation" open><summary>Value estimate</summary><div class="tv-valuation-output"></div>
+      <details class="tv-assumptions"><summary>Edit P/E assumptions</summary><form class="tv-valuation-form" novalidate>
+      <div class="tv-valuation-inputs">${['bear', 'base', 'bull'].map(key => `<label>${key[0].toUpperCase() + key.slice(1)} P/E<input name="${key}" aria-label="${key[0].toUpperCase() + key.slice(1)} P/E" type="number" min="0.01" max="200" step="any" required></label>`).join('')}</div>
+      <div class="tv-valuation-buttons"><button type="submit">Apply</button><button type="button" data-action="valuation-reset">Reset to examples</button></div><p class="tv-valuation-feedback" role="status"></p></form></details></details>
+      <details class="tv-fundamentals" open><summary>Fundamentals</summary><div class="tv-fundamentals-body"></div></details><div class="tv-extras"></div>
       <details class="tv-news"><summary>News and sentiment</summary><div class="tv-news-body"></div></details>
       <details class="tv-guide"><summary>Indicator guide</summary><p>RS compares session returns in percentage points, only for matching market dates. Volume / avg day compares current session volume with the prior 50 full sessions; it is not time-of-day RVOL. ATR uses Wilder smoothing. VWAP is a close × volume estimate from five-minute regular-session bars. Daily indicators combine cached history with the current intraday session when available. History and profile retrieval times appear on the card. Sentiment uses headline keywords, ignores articles older than 48 hours, and fades toward neutral with age.</p></details>
-      <div class="tv-messages" role="status"></div><nav class="tv-research-dock" aria-label="Research links"></nav>`;
+      <div class="tv-messages" role="status"></div><nav class="tv-research-dock" aria-label="Research links"></nav>`);
+    applySectionPreferences();
+    for (const key of TickerView.cardSectionKeys) {
+      const section = modal.querySelector(`details.tv-${key}`);
+      section?.querySelector('summary').addEventListener('click', () => {
+        setTimeout(() => {
+          if (!section.isConnected) return;
+          sectionPreferences[key] = section.open;
+          void request('setCardSection', { section: key, open: section.open }).catch(error => {
+            const status = modal.querySelector('.tv-messages');
+            if (status) status.textContent = error.message;
+          });
+        }, 0);
+      });
+    }
     render();
   }
   function render() {
@@ -230,7 +429,8 @@
     const change = q.regularMarketChangePercent;
     const color = change == null ? '' : change >= 0 ? 'tv-positive' : 'tv-negative';
     const changeText = q.regularMarketChange != null && change != null ? `${number(q.regularMarketChange)} (${number(change, '%')})` : change != null ? number(change, '%') : q.regularMarketChange != null ? number(q.regularMarketChange) : 'Change unavailable';
-    modal.querySelector('.tv-summary').innerHTML = `<div><strong class="tv-symbol">$${escape(q.symbol || state.ticker)}</strong><div class="tv-fullname">${escape(q.longName || '')}</div><div class="tv-company-context">${escape(q.sector || '')}${q.industry ? ` · ${escape(q.industry)}` : ''}</div></div><div class="tv-price-section"><strong class="tv-price">${q.regularMarketPrice == null ? state.loading.has('base') ? 'Loading…' : 'N/A' : money(q.regularMarketPrice)}</strong><div class="${color}">${changeText}</div></div>`;
+    setHTML(modal.querySelector('.tv-summary'), `<div><strong class="tv-symbol">$${escape(q.symbol || state.ticker)}</strong><div class="tv-fullname">${escape(q.longName || '')}</div><div class="tv-company-context">${escape(q.sector || '')}${q.industry ? ` · ${escape(q.industry)}` : ''}</div></div><div class="tv-price-section"><strong class="tv-price">${q.regularMarketPrice == null ? state.loading.has('base') ? 'Loading…' : 'N/A' : money(q.regularMarketPrice)}</strong><div class="${color}">${changeText}</div></div>`);
+    if (state.source && TickerView.normalizeSymbol(state.source) !== state.ticker) { const resolved = document.createElement('div'); resolved.className = 'tv-company-context'; resolved.textContent = `Resolved from ${state.source}`; modal.querySelector('.tv-summary > div').append(resolved); }
     const quoteDate = q.quoteTime ? new Date(q.quoteTime * 1000).toLocaleString() : 'unavailable';
     const oldQuote = q.quoteTime && Date.now() / 1000 - q.quoteTime > 15 * 60;
     const quoteNote = state.statuses.base?.stale ? ' · STALE cache' : oldQuote ? q.marketState === 'regular' ? ' · STALE / last available' : ' · Last regular-session quote' : '';
@@ -245,14 +445,15 @@
     q.relStrengthSector = bench?.sector?.date === q.sessionDate && change != null && bench.sector.change != null ? change - bench.sector.change : null;
     const percentages = new Set(['relStrength', 'relStrengthSector', 'atrPct', 'vwapDist', 'dist200', 'bbPct', 'adrPct', 'gapPct', 'shortFloatPct']);
     const missing = [];
-    modal.querySelector('.tv-stats-grid').innerHTML = settings.indicators.map(key => {
+    setHTML(modal.querySelector('.tv-stats-grid'), settings.indicators.map(key => {
       const value = q[key];
       const loading = ['marketCap', 'shortFloatPct', 'shortRatio'].includes(key) ? state.loading.has('details') : ['vwap', 'vwapDist', 'regularMarketVolume', 'fiftyTwoWeekRange'].includes(key) ? state.loading.has('base') : key.startsWith('relStrength') ? state.loading.has('details') || state.loading.has('base') || state.loading.has('technicals') : state.loading.has('technicals');
       if (value == null && !loading) { missing.push(indicators[key]); return ''; }
       const formatted = ['marketCap', 'regularMarketVolume'].includes(key) ? compactNumber(value) : typeof value === 'string' ? escape(value) : number(value, percentages.has(key) ? key.startsWith('relStrength') ? ' pp' : '%' : key === 'rvol' ? '×' : '');
       return `<div class="tv-stat-item" data-indicator="${key}"><span class="tv-stat-label">${escape(key === 'relStrengthSector' && q.sectorEtf ? `RS vs ${q.sectorEtf}` : indicators[key])}</span><span class="tv-stat-value">${value == null && loading ? '…' : formatted}</span></div>`;
-    }).join('');
-    const fundamentals = q.fundamentals || {};
+    }).join(''));
+    const nonEquityInstrument = ['INDEX', 'CRYPTOCURRENCY', 'CURRENCY', 'FUTURE'].includes(q.instrumentType) || state.ticker.startsWith('^') || /-USD$/.test(state.ticker);
+    const fundamentals = nonEquityInstrument ? {} : q.fundamentals || {};
     const fundamentalFields = [
       ['trailingPE', 'P/E (TTM)', 'ratio'], ['forwardPE', 'Forward P/E', 'ratio'],
       ['priceToSales', 'Price / sales (TTM)', 'ratio'], ['priceToBook', 'Price / book', 'ratio'],
@@ -263,12 +464,13 @@
       ['freeCashFlow', 'Free cash flow', 'cash'], ['totalCash', 'Total cash', 'cash'], ['totalDebt', 'Total debt', 'cash']
     ].filter(([key]) => Number.isFinite(fundamentals[key]));
     const fundamentalsBody = modal.querySelector('.tv-fundamentals-body');
-    fundamentalsBody.innerHTML = fundamentalFields.length ? `<div class="tv-stats-grid">${fundamentalFields.map(([key, label, format]) => {
+    setHTML(fundamentalsBody, fundamentalFields.length ? `<div class="tv-stats-grid">${fundamentalFields.map(([key, label, format]) => {
       const value = fundamentals[key];
       const currency = format === 'cash' ? fundamentals.currency : fundamentals.quoteCurrency || q.currency;
       const formatted = format === 'percent' ? number(value * 100, '%') : format === 'cash' ? compactNumber(value) : number(value, format === 'ratio' ? '×' : '');
       return `<div class="tv-stat-item" data-fundamental="${key}"><span class="tv-stat-label">${label}</span><span class="tv-stat-value">${['cash', 'eps'].includes(format) ? `${escape(currency || 'Currency unreported')} ` : ''}${formatted}</span></div>`;
-    }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`;
+    }).join('')}</div><p class="tv-missing">Provider snapshot · TTM = trailing 12 months. Growth compares with the prior year. Unreported fields are omitted.${fundamentals.fiscalYearEnd ? ` Latest fiscal year ended ${escape(new Date(fundamentals.fiscalYearEnd * 1000).toISOString().slice(0, 10))}.` : ''}</p>` : `<p class="tv-missing">${state.loading.has('details') ? 'Loading fundamentals…' : nonEquityInstrument ? 'Company fundamentals do not apply to this instrument.' : state.sources?.profile ? 'The provider does not publish company fundamentals for this instrument.' : 'Fundamentals could not be loaded. Use Refresh to retry.'}</p>`);
+    renderValuation(q);
     let extras = '';
     if (q.earningsTimestamp) {
       const day = time => new Intl.DateTimeFormat('en-CA', { timeZone: q.timezone || 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(time));
@@ -280,27 +482,21 @@
     else if (q.earningsDate) extras += `<p>Earnings: ${escape(q.earningsDate)}</p>`;
     if (q.extendedPrice != null) extras += `<p>Extended: ${money(q.extendedPrice)}${q.extendedTime ? ` · ${escape(new Date(q.extendedTime * 1000).toLocaleString())}` : ''} · profile snapshot</p>`;
     if (q.shortInterestTimestamp && (q.shortFloatPct != null || q.shortRatio != null)) extras += `<p class="tv-missing">Short interest reported: ${escape(new Date(q.shortInterestTimestamp * 1000).toLocaleDateString())}</p>`;
-    if (q.targetLow != null && q.targetHigh != null) {
-      const min = Math.min(q.targetLow, q.regularMarketPrice ?? q.targetLow) * .95;
-      const max = Math.max(q.targetHigh, q.regularMarketPrice ?? q.targetHigh) * 1.05;
-      const pos = value => Math.max(0, Math.min(100, (value - min) / (max - min || 1) * 100));
-      extras += `<div class="tv-targets"><div>Analyst targets · ${number(q.analystCount, '', 0)} analysts · ${escape(q.recKey || '')}</div><div class="tv-target-track">${[['Low', q.targetLow], ['Mean', q.targetMean], ['High', q.targetHigh], ['Price', q.regularMarketPrice]].filter(([,v]) => v != null).map(([label, value]) => `<span style="left:${pos(value)}%" title="${label}: ${number(value)}"></span>`).join('')}</div><div>Low ${number(q.targetLow)} · Mean ${number(q.targetMean)} · High ${number(q.targetHigh)}</div></div>`;
-    }
-    if (q.targetMean != null && (q.targetLow == null || q.targetHigh == null)) extras += `<p>Analyst mean target: ${money(q.targetMean)} · snapshot</p>`;
     if (missing.length) extras += `<p class="tv-missing">Unavailable: ${escape(missing.join(', '))}.</p>`;
     const dates = [['Daily history', state.statuses.technicals], [state.sources?.profile?.provider ? `Fundamentals (${state.sources.profile.provider})` : 'Fundamentals', state.sources?.profile], ['News', state.sources?.news], ['SPY', state.sources?.spy], ['Sector', state.sources?.sector]].filter(([,v]) => v);
     extras += `<div class="tv-source-dates">${dates.map(([label, s]) => `${label}: ${new Date(s.fetchedAt).toLocaleString()}${s.stale ? ' (stale)' : ''}`).map(escape).join('<br>')}</div>`;
-    modal.querySelector('.tv-extras').innerHTML = extras;
+    setHTML(modal.querySelector('.tv-extras'), extras);
     const sentiment = q.categorySentiment;
     const news = modal.querySelector('.tv-news');
     news.querySelector('summary').textContent = `News and sentiment · ${sentiment?.total.label || (state.loading.has('details') ? 'Loading…' : 'Unavailable')}`;
-    news.querySelector('.tv-news-body').innerHTML = sentiment ? `<p>Headline heuristic · ${sentiment.total.count} fresh articles · score ${number(sentiment.total.score)}</p><p>${['corporate', 'macro', 'regulation', 'retail'].map(cat => `${cat}: ${sentiment[cat].label} (${sentiment[cat].count})`).map(escape).join(' · ')}</p>${sentiment.items.map(item => {
+    setHTML(news.querySelector('.tv-news-body'), sentiment ? `<p>Headline heuristic · ${sentiment.total.count} fresh articles · score ${number(sentiment.total.score)}</p><p>${['corporate', 'macro', 'regulation', 'retail'].map(cat => `${cat}: ${sentiment[cat].label} (${sentiment[cat].count})`).map(escape).join(' · ')}</p>${sentiment.items.map(item => {
       const url = safeURL(item.url);
       return `<article>${url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${escape(item.title)}</a>` : escape(item.title)}<div>${item.time ? escape(new Date(item.time * 1000).toLocaleString()) : 'Time unknown'} · weight ${number(item.decay)} · score ${number(item.score)}<br>Matched: ${escape(item.matched.join(', ') || 'none')}</div></article>`;
-    }).join('') || '<p>No matching headlines available.</p>'}` : '<p>News unavailable.</p>';
+    }).join('') || '<p>No matching headlines available.</p>'}` : '<p>News unavailable.</p>');
     modal.querySelector('.tv-messages').textContent = [...Object.values(state.errors), ...state.issues, ...Object.entries(state.statuses).filter(([, v]) => v.stale).map(([name]) => `${name}: cached data; refresh failed`), state.loading.size ? `Loading ${[...state.loading].join(', ')}…` : ''].filter(Boolean).join(' · ');
     const symbol = encodeURIComponent(q.symbol || state.ticker);
-    modal.querySelector('.tv-research-dock').innerHTML = [['TradingView', `https://www.tradingview.com/chart/?symbol=${symbol}`], ['Finviz', `https://finviz.com/quote.ashx?t=${symbol}`], ['Insider', `https://openinsider.com/search?q=${symbol}`]].map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`).join('');
+    const nonEquity = q.instrumentType && !['EQUITY', 'ETF'].includes(q.instrumentType) || state.ticker.startsWith('^') || /-USD$/.test(state.ticker);
+    setHTML(modal.querySelector('.tv-research-dock'), [['Yahoo Finance', `https://finance.yahoo.com/quote/${symbol}/`], ...(!nonEquity ? [['TradingView', `https://www.tradingview.com/chart/?symbol=${symbol}`], ['Finviz', `https://finviz.com/quote.ashx?t=${symbol}`], ['Insider', `https://openinsider.com/search?q=${symbol}`]] : [])].map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`).join(''));
     drawChart(); position();
   }
   let chartIndex = 0, chartIdentity;
@@ -314,7 +510,7 @@
     const maxVol = Math.max(1, ...points.map(p => p.volume || 0));
     const coords = points.map((p, i) => `${i / (points.length - 1) * 300},${75 - (p.close - min) / range * 65}`);
     const volumes = points.map((p, i) => `<rect x="${i / (points.length - 1) * 300}" y="${98 - (p.volume || 0) / maxVol * 20}" width="${Math.max(.5, 280 / points.length)}" height="${(p.volume || 0) / maxVol * 20}" class="tv-volume-bar"/>`).join('');
-    container.innerHTML = `<svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">${volumes}<polyline points="${coords.join(' ')}" fill="none" class="tv-chart-line" stroke-width="1.5"/><line class="tv-crosshair" y1="0" y2="100" stroke-dasharray="3 3"/></svg>`;
+    setHTML(container, `<svg viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">${volumes}<polyline points="${coords.join(' ')}" fill="none" class="tv-chart-line" stroke-width="1.5"/><line class="tv-crosshair" y1="0" y2="100" stroke-dasharray="3 3"/></svg>`);
     chartIndex = points.length - 1; inspectChart(chartIndex);
   }
   function inspectChart(index) {
@@ -346,6 +542,7 @@
     if (!button || !state) return;
     if (button.dataset.range) { void selectRange(button.dataset.range); return; }
     const action = button.dataset.action;
+    if (action === 'valuation-reset') { void saveValuation(true); return; }
     if (action === 'close') close();
     if (action === 'pin') { pinned = !pinned; button.textContent = pinned ? 'Unpin' : 'Pin'; button.setAttribute('aria-pressed', String(pinned)); position(); }
     if (action === 'refresh') void load(state.ticker, false);
@@ -375,20 +572,18 @@
     const target = event.target.closest?.('.tickerview-highlight');
     if (!active || !target || pinned || target.contains(event.relatedTarget)) return;
     clearTimeout(hideTimer); clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => { anchor = target; chartIdentity = null; void load(target.dataset.ticker); }, settings.hoverDelay);
-  });
-  document.addEventListener('mouseout', event => { const target = event.target.closest?.('.tickerview-highlight'); if (target && !target.contains(event.relatedTarget)) hideLater(400); });
+    hoverTimer = setTimeout(() => {
+      const ticker = target.isConnected && cashtag(target.textContent);
+      if (ticker) void openTicker(ticker, target);
+    }, settings.hoverDelay);
+  }, true);
+  document.addEventListener('mouseout', event => { const target = event.target.closest?.('.tickerview-highlight'); if (target && !target.contains(event.relatedTarget)) hideLater(400); }, true);
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !modal.hidden) { event.preventDefault(); close(); return; }
     const target = event.target.closest?.('.tickerview-highlight');
     if (active && target && ['Enter', ' '].includes(event.key)) {
       event.preventDefault(); clearTimeout(hoverTimer); clearTimeout(hideTimer);
-      pinned = true; anchor = target; chartIdentity = null;
-      void load(target.dataset.ticker);
-      const pin = modal.querySelector('[data-action="pin"]'); pin.textContent = 'Unpin'; pin.setAttribute('aria-pressed', 'true');
-      // Position once before keeping the keyboard-opened card pinned.
-      pinned = false; position(); pinned = true;
-      modal.querySelector('button').focus();
+      void openTicker(target.dataset.ticker, target, true);
     }
   });
   window.addEventListener('scroll', event => { if (!modal.hidden && !pinned && !modal.contains(event.target)) close(); }, { passive: true, capture: true });
@@ -400,31 +595,34 @@
     if (!document.hidden && state) void load(state.ticker, false);
   });
   if (popup) document.addEventListener('tickerview:open', event => {
-    try {
-      const ticker = TickerView.normalizeSymbol(event.detail.ticker);
-      clearTimeout(hoverTimer); clearTimeout(hideTimer);
-      pinned = false; anchor = event.detail.anchor; chartIdentity = null;
-      void load(ticker);
-      position(); pinned = true;
-      const button = modal.querySelector('[data-action="pin"]'); button.textContent = 'Unpin'; button.setAttribute('aria-pressed', 'true');
-      modal.setAttribute('aria-modal', 'true');
-      for (const element of document.body.children) if (element !== modal && !inertElements.has(element)) { inertElements.set(element, element.inert); element.inert = true; }
-      modal.querySelector('[data-action="close"]').focus();
-    } catch { /* Popup validates symbols before sending the event. */ }
+    void openTicker(event.detail.ticker, event.detail.anchor, true, true, event.detail.source || event.detail.ticker);
   });
   modal.addEventListener('keydown', event => {
     if (!popup || event.key !== 'Tab') return;
-    const focusable = [...modal.querySelectorAll('button:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
+    const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.customAliases) TickerView.setAliases(changes.customAliases.newValue);
+    if (changes.tickerNotes && state && noteState?.ready && !noteState.saving) {
+      const remote = changes.tickerNotes.newValue?.[state.ticker] || { text: '', revision: null };
+      if (remote.revision !== noteState.revision) {
+        if (noteDirty()) { noteState.conflict = true; noteState.remote = remote; noteState.message = 'This note changed in another window. Your draft is preserved.'; }
+        else Object.assign(noteState, { text: remote.text, saved: remote.text, revision: remote.revision, conflict: false, message: '' });
+        renderNote();
+      }
+    }
+    if (changes.cardSections) { sectionPreferences = TickerView.cardSections(changes.cardSections.newValue); applySectionPreferences(); }
+    if (changes.valuationScenarios) { valuationScenarios = changes.valuationScenarios.newValue || {}; if (state) renderValuation(state.quote); }
     if (changes.settings) { settings = TickerView.settings(changes.settings.newValue); applySettings(); }
     if (changes.watchlist) { watchlist = changes.watchlist.newValue || []; if (state) render(); }
   });
-  chrome.storage.local.get(['settings', 'watchlist']).then(values => {
+  chrome.storage.local.get(['settings', 'watchlist', 'valuationScenarios', 'customAliases']).then(values => {
+    TickerView.setAliases(values.customAliases);
+    valuationScenarios = values.valuationScenarios || {};
     settings = TickerView.settings(values.settings); watchlist = values.watchlist || []; applySettings();
   }).catch(() => applySettings());
 })();

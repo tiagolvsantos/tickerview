@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TickerView",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "Hover over stock tickers to see real-time technical stats and charts.",
   "permissions": [
     "storage",
@@ -13,7 +13,6 @@
     "https://finance.yahoo.com/*"
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -90,5 +89,13 @@
         "https://*.finviz.com/*"
       ]
     }
-  ]
+  ],
+  "commands": {
+    "open-search": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "Open TickerView ticker search"
+    }
+  }
 }
