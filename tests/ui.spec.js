@@ -56,6 +56,7 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
             if (request.text) tickerNotes[request.ticker] = note; else delete tickerNotes[request.ticker];
             await window.updateStorage({ tickerNotes }); return { success: true, note: request.text ? note : { text: '', revision: null } };
           }
+          if (request.action === 'initializeDashboardPreferences') return { success: true };
           if (request.action === 'setDashboardPreferences') { const dashboardPreferences = TickerView.dashboardPreferences({ ...values.dashboardPreferences, ...request.patch }); await window.updateStorage({ dashboardPreferences }); return { success: true, dashboardPreferences }; }
           if (request.action === 'saveWindowBounds') {
             const patch = { windowBounds: request.bounds };
@@ -750,7 +751,7 @@ test('freshness uses retrieval time and auto refresh pauses while hidden and res
   await page.clock.runFor(120000); expect(await calls()).toBe(1); await expect(page.locator('#refresh-countdown')).toHaveText('Paused');
   await page.evaluate(() => { window.testHidden = false; document.dispatchEvent(new Event('visibilitychange')); });
   await page.clock.runFor(1); await expect.poll(calls).toBe(2);
-  await page.clock.runFor(15000); await expect.poll(calls).toBe(3);
+  await page.clock.runFor(5000); await expect.poll(calls).toBe(3);
   await page.locator('#open-settings').click(); await page.locator('#auto-refresh').uncheck(); await page.clock.runFor(120000); expect(await calls()).toBe(3);
 });
 test('window restores saved bounds, supports fit/full height, and remembers manual resizing', async ({ page }) => {
@@ -768,16 +769,16 @@ test('window restores saved bounds, supports fit/full height, and remembers manu
   await page.locator('#open-settings').click(); await expect(page.locator('#window-mode')).toHaveValue('remember');
 });
 
-test('refresh icon supports manual updates and configurable automatic countdown defaults to 15 seconds', async ({ page }) => {
+test('refresh icon supports manual updates and configurable automatic countdown defaults to 5 seconds', async ({ page }) => {
   await page.clock.install({ time: Date.parse('2026-10-23T17:00:00Z') });
   await mockChrome(page, { popup: true, initial: { dashboardPreferences: {} } });
   await page.clock.runFor(1);
   const calls = () => page.evaluate(() => window.testCalls.filter(call => call.action === 'refreshDashboard'));
   await expect.poll(async () => (await calls()).length).toBe(1);
-  await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 15s'); expect((await calls())[0].force).toBe(false);
-  await page.clock.runFor(5000); await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 10s');
+  await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 5s'); expect((await calls())[0].force).toBe(false);
+  await page.clock.runFor(1000); await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 4s');
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Market', exact: true }).click();
-  await expect(page.locator('#auto-refresh')).toBeChecked(); await expect(page.locator('#refresh-interval')).toHaveValue('15');
+  await expect(page.locator('#auto-refresh')).toBeChecked(); await expect(page.locator('#refresh-interval')).toHaveValue('5');
   await page.locator('#refresh-interval').selectOption('30'); await expect(page.locator('#refresh-countdown')).toHaveText('Refresh in 30s');
   await page.locator('#close-settings').click();
   await page.evaluate(() => { window.blockRefresh = true; });

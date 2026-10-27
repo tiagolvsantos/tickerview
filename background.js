@@ -216,6 +216,13 @@ async function handle(request) {
       const next = { ...TickerView.cardSections(cardSections), [request.section]: request.open };
       await chrome.storage.local.set({ cardSections: next }); return { cardSections: next };
     });
+    case 'initializeDashboardPreferences': return editStorage(async () => {
+      const saved = await chrome.storage.local.get(['dashboardPreferences', 'fiveSecondRefreshMigration']);
+      if (saved.fiveSecondRefreshMigration) return {};
+      const dashboardPreferences = TickerView.dashboardPreferences({ ...saved.dashboardPreferences, autoRefresh: true, refreshInterval: 5 });
+      await chrome.storage.local.set({ dashboardPreferences, fiveSecondRefreshMigration: 1 });
+      return { dashboardPreferences };
+    });
     case 'library': return library();
     case 'exportBackup': {
       await library();
@@ -244,7 +251,7 @@ async function handle(request) {
       const { dashboardPreferences = {} } = await chrome.storage.local.get('dashboardPreferences');
       const patch = request.patch || {};
       if (Object.hasOwn(patch, 'autoRefresh') && typeof patch.autoRefresh !== 'boolean' || Object.hasOwn(patch, 'windowMode') && !['remember', 'fit', 'full'].includes(patch.windowMode)) throw new Error('Invalid market window preference');
-      if (Object.hasOwn(patch, 'refreshInterval') && ![15, 30, 60, 120, 300].includes(patch.refreshInterval)) throw new Error('Invalid refresh interval');
+      if (Object.hasOwn(patch, 'refreshInterval') && ![5, 15, 30, 60, 120, 300].includes(patch.refreshInterval)) throw new Error('Invalid refresh interval');
       const preferences = TickerView.dashboardPreferences({ ...dashboardPreferences, ...patch });
       await chrome.storage.local.set({ dashboardPreferences: preferences }); return { dashboardPreferences: preferences };
     });

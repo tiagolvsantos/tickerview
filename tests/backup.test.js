@@ -51,13 +51,13 @@ test('canonical identities and alias targets are literal; no alias chains or rem
   assert.deepEqual(patch.watchlist, ['BTC', 'BTC-USD']); assert.equal(patch.customAliases.COIN, 'BTC');
 });
 test('market preferences round trip while old backups remain compatible and window geometry stays local', () => {
-  const stored = { ...source(), dashboardPreferences: { autoRefresh: true, refreshInterval: 15, windowMode: 'fit' }, windowBounds: { width: 500, height: 700 } };
+  const stored = { ...source(), dashboardPreferences: { autoRefresh: true, refreshInterval: 5, windowMode: 'fit' }, windowBounds: { width: 500, height: 700 } };
   const backup = createBackup(stored);
   assert.deepEqual(backup.data.dashboardPreferences, stored.dashboardPreferences); assert.equal(backup.data.windowBounds, undefined);
   assert.deepEqual(prepareImport({}, backup, 'replace').patch.dashboardPreferences, stored.dashboardPreferences);
   delete backup.data.dashboardPreferences.refreshInterval;
-  assert.equal(validateBackup(backup).dashboardPreferences.refreshInterval, 15);
-  backup.data.dashboardPreferences.refreshInterval = 5; assert.throws(() => validateBackup(backup), /refresh interval/);
+  assert.equal(validateBackup(backup).dashboardPreferences.refreshInterval, 5);
+  backup.data.dashboardPreferences.refreshInterval = 1; assert.throws(() => validateBackup(backup), /refresh interval/);
   delete backup.data.dashboardPreferences;
-  assert.deepEqual(validateBackup(backup).dashboardPreferences, { autoRefresh: true, refreshInterval: 15, windowMode: 'remember' });
+  assert.deepEqual(validateBackup(backup).dashboardPreferences, { autoRefresh: true, refreshInterval: 5, windowMode: 'remember' });
 });

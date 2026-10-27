@@ -398,6 +398,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 (async () => {
   try {
+    await request('initializeDashboardPreferences');
     const [values, tabs] = await Promise.all([chrome.storage.local.get(['settings', 'customAliases', 'watchSort', 'dashboardPreferences', 'windowBounds', 'marketOverview', 'tickerNotes']), chrome.tabs.query({ active: true, currentWindow: true }), refreshLibrary()]);
     noteSymbols = new Set(Object.entries(values.tickerNotes || {}).filter(([, note]) => note?.text).map(([symbol]) => symbol));
     dashboardPreferences = TickerView.dashboardPreferences(values.dashboardPreferences); overviewSnapshots = values.marketOverview || {}; renderDashboardPreferences(); renderOverview();

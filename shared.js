@@ -47,7 +47,7 @@ globalThis.TickerView = (() => {
   }
   const overviewSymbols = Object.freeze(['SPY', 'QQQ', '^VIX', 'BTC-USD']);
   function dashboardPreferences(value = {}) {
-    return { autoRefresh: value?.autoRefresh !== false, refreshInterval: [15, 30, 60, 120, 300].includes(value?.refreshInterval) ? value.refreshInterval : 15, windowMode: ['remember', 'fit', 'full'].includes(value?.windowMode) ? value.windowMode : 'remember' };
+    return { autoRefresh: value?.autoRefresh !== false, refreshInterval: [5, 15, 30, 60, 120, 300].includes(value?.refreshInterval) ? value.refreshInterval : 5, windowMode: ['remember', 'fit', 'full'].includes(value?.windowMode) ? value.windowMode : 'remember' };
   }
   function windowBounds(value) {
     if (!value || !['width', 'height'].every(key => Number.isFinite(value[key]))) return null;

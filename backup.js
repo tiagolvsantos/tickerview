@@ -42,7 +42,7 @@ export function validateBackup(backup) {
   if (data.dashboardPreferences !== undefined) {
     exact(data.dashboardPreferences, ['autoRefresh', 'refreshInterval', 'windowMode'], 'market window preferences');
     if (typeof data.dashboardPreferences.autoRefresh !== 'boolean' || !['remember', 'fit', 'full'].includes(data.dashboardPreferences.windowMode)) fail('invalid market window preferences');
-    if (data.dashboardPreferences.refreshInterval !== undefined && ![15, 30, 60, 120, 300].includes(data.dashboardPreferences.refreshInterval)) fail('invalid refresh interval');
+    if (data.dashboardPreferences.refreshInterval !== undefined && ![5, 15, 30, 60, 120, 300].includes(data.dashboardPreferences.refreshInterval)) fail('invalid refresh interval');
   }
   return {
     dashboardPreferences: TickerView.dashboardPreferences(data.dashboardPreferences),

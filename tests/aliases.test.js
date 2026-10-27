@@ -32,5 +32,5 @@ test('header sort modes support descending symbols and numeric prices with missi
   assert.deepEqual(tv.sortSymbols(list, quotes, 'price-desc'), ['A', 'C', 'B', 'D']);
   assert.deepEqual(tv.sortSymbols(list, quotes, 'price-asc'), ['B', 'C', 'A', 'D']);
   assert.deepEqual(tv.sortSymbols(list, quotes, 'symbol-desc'), ['D', 'C', 'B', 'A']);
-  assert.deepEqual(tv.dashboardPreferences(), { autoRefresh: true, refreshInterval: 15, windowMode: 'remember' });
+  assert.deepEqual(tv.dashboardPreferences(), { autoRefresh: true, refreshInterval: 5, windowMode: 'remember' });
 });

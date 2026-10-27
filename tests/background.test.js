@@ -226,8 +226,8 @@ test('overview and dashboard refresh share a three-request queue without saving 
 });
 test('market window preferences validate and manual bounds select remembered sizing', async () => {
   assert.equal((await send({ action: 'setDashboardPreferences', patch: { autoRefresh: 'yes' } })).success, false);
-  await send({ action: 'setDashboardPreferences', patch: { autoRefresh: true, refreshInterval: 15, windowMode: 'fit' } });
-  assert.deepEqual(values.dashboardPreferences, { autoRefresh: true, refreshInterval: 15, windowMode: 'fit' });
+  await send({ action: 'setDashboardPreferences', patch: { autoRefresh: true, refreshInterval: 5, windowMode: 'fit' } });
+  assert.deepEqual(values.dashboardPreferences, { autoRefresh: true, refreshInterval: 5, windowMode: 'fit' });
   await send({ action: 'saveWindowBounds', bounds: { width: 620, height: 760, left: 12, top: 20 }, manual: true });
   assert.equal(values.dashboardPreferences.windowMode, 'remember'); assert.equal(values.dashboardPreferences.autoRefresh, true);
   const get = chrome.windows.get, getAll = chrome.windows.getAll;
@@ -353,4 +353,14 @@ test('late indicator history cannot overwrite a newer quote session', async () =
     release(); assert.equal((await pending).success, true);
     assert.deepEqual(values.quoteSnapshots[symbol], newer);
   } finally { release(); globalThis.fetch = original; }
+});
+
+test('five-second refresh migration enables existing windows once and preserves later choices', async () => {
+  values.dashboardPreferences = { autoRefresh: false, refreshInterval: 30, windowMode: 'fit' };
+  delete values.fiveSecondRefreshMigration;
+  await send({ action: 'initializeDashboardPreferences' });
+  assert.deepEqual(values.dashboardPreferences, { autoRefresh: true, refreshInterval: 5, windowMode: 'fit' });
+  await send({ action: 'setDashboardPreferences', patch: { autoRefresh: false, refreshInterval: 30 } });
+  await send({ action: 'initializeDashboardPreferences' });
+  assert.deepEqual(values.dashboardPreferences, { autoRefresh: false, refreshInterval: 30, windowMode: 'fit' });
 });

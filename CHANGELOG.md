@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Default market auto-refresh to five seconds and add a five-second interval option, enabling it once for existing installations while preserving subsequent preference changes.
+
 ### Added
 
 - Docked ticker research in wide market windows and a full-width research view with Back in smaller windows, reusing existing charts, research sections and note safeguards.
