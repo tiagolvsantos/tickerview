@@ -127,6 +127,7 @@ window.addEventListener('resize', updateColumnHelpPosition);
 window.addEventListener('scroll', updateColumnHelpPosition);
 function renderLibrary() {
   if (draggedSymbol) return;
+  const focusedCompare = document.activeElement?.matches('.compare-checkbox') ? document.activeElement.dataset.symbol : null;
   const focused = document.activeElement?.dataset.openTicker, focusedSort = document.activeElement?.dataset.sortKey, focusedReorder = document.activeElement?.dataset.reorderSymbol;
   const container = $('#watchlist'); container.replaceChildren();
   const query = $('#watch-filter').value.trim().toLowerCase();
@@ -251,6 +252,7 @@ function renderLibrary() {
   if (focusedSort) table.querySelector(`[data-sort-key="${focusedSort}"]`)?.focus({ preventScroll: true });
   if (focusedReorder) [...container.querySelectorAll('[data-reorder-symbol]')].find(button => button.dataset.reorderSymbol === focusedReorder)?.focus({ preventScroll: true });
   renderFreshness(); scheduleFit();
+  document.dispatchEvent(new CustomEvent('tickerview:library-rendered', { detail: { focusedCompare } }));
 }
 async function refreshLibrary() {
   const id = ++libraryGeneration;
@@ -324,7 +326,7 @@ $('#add-symbol').addEventListener('keydown', event => {
 });
 $('#watch-filter').addEventListener('input', renderLibrary);
 document.addEventListener('keydown', event => {
-  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || $('#settings-dialog').open || !$('#tickerview-modal').hidden) return;
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || $('#settings-dialog').open || document.body.classList.contains('research-open') || !$('#tickerview-modal').hidden) return;
   if (event.key === 'Escape' && !$('#column-tooltip').hidden) { event.preventDefault(); hideColumnHelp(); return; }
   if (event.key === 'Escape' && reorderMode && !reorderBusy) { event.preventDefault(); finishReorder(); }
   else if (event.key === 'Escape' && event.target === $('#watch-filter')) {
@@ -454,7 +456,7 @@ async function refreshDashboard(force = false, symbols) {
     const entries = Object.values(refreshOutcomes), failed = entries.filter(item => item.error || item.stale).length;
     $('#refresh-feedback').textContent = failed ? `${failed} unavailable or using cached/fallback data` : '';
   } catch (error) { $('#refresh-feedback').textContent = error.message; }
-  finally { dashboardBusy = false; button.disabled = false; button.classList.remove('is-refreshing'); button.setAttribute('aria-busy', 'false'); renderFreshness(); scheduleAutoRefresh(); retryingQuotes = false;
+  finally { document.dispatchEvent(new CustomEvent('tickerview:dashboard-refreshed')); dashboardBusy = false; button.disabled = false; button.classList.remove('is-refreshing'); button.setAttribute('aria-busy', 'false'); renderFreshness(); scheduleAutoRefresh(); retryingQuotes = false;
     if (retryFocused && $('#retry-quotes').hidden) button.focus();
   }
 }
@@ -665,7 +667,7 @@ function scheduleFit() {
   if (windowReady && dashboardPreferences.windowMode === 'fit') fitTimer = setTimeout(() => void applyWindowLayout().catch(error => message(error.message)), 100);
 }
 async function applyWindowLayout(saved, mode = dashboardPreferences.windowMode) {
-  if (!expanded || $('#settings-dialog').open || !$('#tickerview-modal').hidden) return;
+  if (!expanded || $('#settings-dialog').open || document.body.classList.contains('research-open') || !$('#tickerview-modal').hidden) return;
   const current = await chrome.windows.getCurrent();
   const stored = saved || (await chrome.storage.local.get('windowBounds')).windowBounds;
   const remembered = mode === 'remember' ? TickerView.windowBounds(stored) : null;

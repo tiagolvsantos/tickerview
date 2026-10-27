@@ -163,7 +163,7 @@
     if (state) render();
   }
   function position() {
-    if (modal.hidden || pinned) return;
+    if (popup || modal.hidden || pinned) return;
     const rect = anchor?.isConnected ? anchor.getBoundingClientRect() : { left: 16, top: 16, bottom: 16 };
     const width = modal.offsetWidth, height = modal.offsetHeight;
     const beside = rect.bottom + height + 10 > innerHeight && rect.top - height - 10 < 0 && rect.right + width + 16 <= innerWidth;
@@ -173,13 +173,13 @@
   }
   function closeNow() {
     generation++; chartGeneration++; clearTimeout(refreshTimer); clearTimeout(hoverTimer); clearTimeout(hideTimer);
-    const returnFocus = modal.contains(document.activeElement), ticker = state?.ticker;
+    const returnFocus = popup || modal.contains(document.activeElement), ticker = state?.ticker;
     modal.hidden = true; pinned = false; state = null; noteState = null;
     for (const [element, value] of inertElements) element.inert = value;
     inertElements.clear();
     const button = anchor?.isConnected ? anchor : popup ? [...document.querySelectorAll('[data-open-ticker]')].find(node => node.dataset.openTicker === ticker) : null; anchor = null;
-    if (returnFocus && button?.isConnected) button.focus({ preventScroll: true });
     if (popup) document.dispatchEvent(new CustomEvent('tickerview:closed'));
+    if (returnFocus && button?.isConnected) button.focus({ preventScroll: true });
   }
   let noteState = null, leavePending = null;
   const noteDirty = () => noteState && noteState.text !== noteState.saved;
@@ -240,7 +240,8 @@
     position(); pinned = keyboard || popup;
     const button = modal.querySelector('[data-action="pin"]');
     button.textContent = pinned ? 'Unpin' : 'Pin'; button.setAttribute('aria-pressed', String(pinned));
-    if (popup) {
+    if (popup) document.dispatchEvent(new CustomEvent('tickerview:opened', { detail: { ticker } }));
+    if (popup && !document.body.classList.contains('tv-research-enabled')) {
       modal.setAttribute('aria-modal', 'true');
       for (const element of document.body.children) if (element !== modal && !inertElements.has(element)) { inertElements.set(element, element.inert); element.inert = true; }
     }
@@ -598,7 +599,7 @@
     void openTicker(event.detail.ticker, event.detail.anchor, true, true, event.detail.source || event.detail.ticker);
   });
   modal.addEventListener('keydown', event => {
-    if (!popup || event.key !== 'Tab') return;
+    if (!popup || document.body.classList.contains('tv-research-enabled') || event.key !== 'Tab') return;
     const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')].filter(node => node.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }

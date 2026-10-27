@@ -232,3 +232,51 @@ body.tv-expanded #indicators { max-height: min(360px, 45vh); }
 .watch-table .watch-vwap-diff-amount { font-size: 9px; color: var(--tv-text); }
 .watch-vwap-diff .positive { color: #58d98f; }
 .watch-vwap-diff .negative { color: #ff8a83; }
+
+/* Research views are scoped to the extension window. Website cards stay floating. */
+.research-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; font-size: 10px; }
+.research-tools select { width: auto; padding: 5px; }
+.research-tools button { font-size: 10px; }
+.comparison-selection { display: flex; flex-wrap: wrap; gap: 5px; }
+.research-tools [role="status"] { color: var(--tv-muted); font-size: 9px; }
+.watch-table .trend-column { width: 112px; }
+.watch-table .trend-heading { padding: 8px; color: var(--tv-muted); font-size: 9px; font-weight: 400; text-align: center; white-space: nowrap; }
+.watch-table .watch-trend { min-width: 100px; padding: 4px 8px; }
+.watch-trend button { display: block; border: 0; width: 100%; padding: 0; background: transparent; font-size: 9px; }
+.watch-trend svg { display: block; width: 100px; height: 28px; margin: auto; }
+.watch-trend small { display: block; font-size: 8px; color: var(--tv-muted); }
+.watch-table .compare-checkbox { width: 14px; height: 14px; margin: 6px; accent-color: var(--tv-accent); }
+#research-panel { min-width: 0; border: 1px solid var(--tv-border); background: var(--tv-bg); }
+#research-panel[hidden], #ticker-comparison[hidden] { display: none; }
+.research-navigation { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-bottom: 1px solid var(--tv-border); }
+.research-navigation button { font-size: 10px; }
+body.tv-research-enabled #tickerview-modal { position: static; width: 100%; max-width: none; max-height: none; border: 0; box-shadow: none; margin: 0; }
+body.tv-research-enabled #tickerview-modal [data-action="pin"] { display: none; }
+body.tv-research-enabled #tickerview-modal .tv-chart { height: 180px; }
+body.tv-research-enabled #tickerview-modal .tv-chart svg { height: 100%; }
+body.research-open .library-layout { display: block; }
+body.research-open .watch-section, body.research-open .recent-section { display: none; }
+#ticker-comparison { padding: 16px; font-size: 11px; }
+#ticker-comparison h2 { margin-top: 0; }
+#ticker-comparison > p { color: var(--tv-muted); line-height: 1.6; }
+#ticker-comparison select { width: auto; }
+.comparison-chart { width: 100%; height: 220px; margin: 14px 0; }
+.comparison-chart svg { width: 100%; height: 100%; }
+.comparison-chart:focus-visible { outline: 2px solid var(--tv-accent); outline-offset: 3px; }
+.comparison-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; font-size: 10px; }
+.comparison-stats { overflow-x: auto; }
+.comparison-stats table { border-collapse: collapse; width: 100%; font-size: 10px; }
+.comparison-stats th, .comparison-stats td { padding: 10px 7px; text-align: right; border-bottom: 1px solid var(--tv-border); white-space: nowrap; }
+.comparison-stats th:first-child { text-align: left; }
+@media (min-width: 1100px) {
+  body.research-open .library-layout { display: grid; grid-template-columns: minmax(0, 1fr) 480px; grid-template-rows: min-content 1fr; gap: 20px; align-items: start; }
+  body.research-open .watch-section, body.research-open .recent-section { display: block; grid-column: 1; }
+  body.research-open .recent-section { grid-row: 2; border-left: 0; padding-left: 0; }
+  body.research-open #research-panel { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+}
+.research-tools button[aria-pressed="true"] { border-color: var(--tv-accent); color: var(--tv-accent); }
+.watch-row.research-selected { box-shadow: inset 2px 0 var(--tv-accent); background: var(--tv-control); }
+body.comparison-picking .watch-row td:first-child > .watch-open,
+body.comparison-picking .watch-row td:first-child > .watch-identity-row { display: inline-flex; width: calc(100% - 28px); vertical-align: middle; }
+.watch-row .compare-checkbox { vertical-align: middle; }
+.comparison-axis { font: 9px/1.5 var(--tv-mono); }

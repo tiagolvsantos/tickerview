@@ -124,7 +124,15 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
           await new Promise(r => setTimeout(r, request.action === 'details' ? 350 : delay));
           const points = Array.from({ length: 15 }, (_, i) => ({ time: 1792762200 + i * 300, close: 100 + i, volume: i * 100 }));
           const status = { fetchedAt: Date.now(), stale: false };
-          if (request.action === 'chart') return { success: true, chart: { points: points.map(p => ({ ...p, close: p.close + 20 })), interval: '1d', timezone: 'America/New_York' }, status };
+          if (request.action === 'chart') {
+            window.activeTestCharts = (window.activeTestCharts || 0) + 1;
+            window.maxTestCharts = Math.max(window.maxTestCharts || 0, window.activeTestCharts);
+            const custom = values.testCharts?.[request.ticker];
+            if (values.testChartDelay) await new Promise(resolve => setTimeout(resolve, values.testChartDelay));
+            window.activeTestCharts--;
+            if (custom?.error) return { success: false, error: custom.error };
+            return { success: true, chart: custom?.chart || { points: points.map((p, i) => ({ ...p, time: 1791561600 + i * 86400, close: p.close + 20 })), interval: '1d', timezone: 'America/New_York' }, status: { ...status, ...custom?.status } };
+          }
           if (request.action === 'base') return { success: true, quote: { symbol: ticker, longName: ticker, currency: 'USD', exchange: 'NASDAQ', quoteTime: Date.now() / 1000, sessionDate: '2026-10-23', marketState: 'regular', regularMarketPrice: 114, regularMarketChange: 4, regularMarketChangePercent: 4 }, chart: { points, interval: '5m', timezone: 'America/New_York' }, status };
           if (request.action === 'technicals') return { success: true, quote: { rsi: 55, gapPct: 1, regularMarketChangePercent: 4 }, sessionDate: '2026-10-23', status };
           return { success: true, quote: { instrumentType: ticker.startsWith('^') ? 'INDEX' : ticker.endsWith('-USD') ? 'CRYPTOCURRENCY' : ticker === 'FUND' ? 'ETF' : 'EQUITY', longName: `${ticker} Company`, sector: 'Technology', marketCap: 1.6e12, fundamentals: { trailingPE: 20, trailingEps: ticker === 'LOSS' ? -2 : 4, revenue: 4e12, currency: 'JPY', quoteCurrency: 'USD', revenueGrowth: 0, profitMargin: -.02, totalDebt: 0 }, shortFloatPct: 1.53, shortRatio: 1.72, targetMean: 846, categorySentiment: { total: { label: 'Bullish', count: 1, score: 1 }, ...Object.fromEntries(['corporate','macro','regulation','retail'].map(cat => [cat, { label: 'Neutral', count: 0 }])), items: [{ title: 'Company surge', time: Date.now() / 1000, url: 'javascript:alert(1)', decay: 1, score: 2, matched: ['surge'] }] } }, benchmarks: { spy: { change: 2, date: '2026-10-23' }, sector: { change: 1, date: '2026-10-22' } }, sources: { profile: { ...status, provider: 'Yahoo Finance' } }, issues: [] };
@@ -139,7 +147,11 @@ async function mockChrome(page, { popup = false, initial = {}, url = 'https://x.
   } else { await page.addStyleTag({ content: await file('styles.css') }); }
   await page.addScriptTag({ content: await file('shared.js') });
   await page.addScriptTag({ content: await file('content.js') });
-  if (popup) await page.addScriptTag({ content: await file('popup.js') });
+  if (popup) {
+    await page.addScriptTag({ content: await file('popup.js') });
+    await page.addScriptTag({ content: await file('research-data.js') });
+    await page.addScriptTag({ content: await file('research.js') });
+  }
 }
 test('progressive card, stale-response protection, pin, watchlist, chart, keyboard and session benchmarks', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -485,7 +497,7 @@ test('popup valuation inputs participate in keyboard navigation and retain model
   await page.keyboard.press('Tab'); await expect(page.getByRole('spinbutton', { name: 'Bull P/E', exact: true })).toBeFocused();
   await page.keyboard.press('Tab'); await expect(page.locator('.tv-valuation-form button[type="submit"]')).toBeFocused();
   await page.locator('.tv-research-dock a').last().focus(); await page.keyboard.press('Tab');
-  await expect(page.locator('[data-action="pin"]')).toBeFocused();
+  await expect(page.locator('#keyboard-help summary')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Open AAPL stock card' })).toBeFocused();
 });
@@ -667,9 +679,9 @@ test('market-first watchlist table and gear settings work at normal and narrow w
   } });
   await expect(page.locator('#settings-dialog')).toBeHidden();
   await expect(page.getByRole('table', { name: 'Watchlist quotes' })).toBeVisible();
-  await expect(page.getByRole('columnheader')).toHaveText(['Symbol / company ↕', 'Price ↕', 'Change ↕', 'RSI (14)', 'YTD VWAP*', 'Δ VWAP', '× Actions']);
-  await expect(page.locator('.watch-row').first().locator('td')).toHaveCount(7);
-  expect((await page.locator('#watchlist').boundingBox()).y).toBeLessThan(340);
+  await expect(page.getByRole('columnheader')).toHaveText(['Symbol / company ↕', 'Price ↕', 'Change ↕', 'RSI (14)', 'YTD VWAP*', 'Δ VWAP', 'Trend · 1M', '× Actions']);
+  await expect(page.locator('.watch-row').first().locator('td')).toHaveCount(8);
+  expect((await page.locator('#watchlist').boundingBox()).y).toBeLessThan(400);
   await page.screenshot({ path: 'test-results/market-table.png' });
   await page.locator('#open-settings').click(); await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Market', exact: true })).toBeFocused();
@@ -1032,4 +1044,164 @@ test('VWAP distance uses estimate as baseline, preserves zero and missing data, 
   await page.screenshot({ path: 'test-results/watchlist-vwap-diff.png' });
   await page.setViewportSize({ width: 320, height: 640 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('research panel docks, navigates the sorted watchlist and preserves note leave prompts', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: { watchlist: ['AAPL', 'MSFT', 'META'], watchSort: 'symbol' } });
+  await page.getByRole('button', { name: 'Open AAPL stock card' }).click();
+  await expect(page.locator('.tv-symbol')).toHaveText('$AAPL');
+  await expect(page.locator('.watch-section')).toBeVisible();
+  const panel = await page.locator('#research-panel').boundingBox(), list = await page.locator('.watch-section').boundingBox();
+  expect(panel.x).toBeGreaterThanOrEqual(list.x + list.width);
+  await expect(page.getByRole('button', { name: 'Previous watchlist ticker' })).toBeDisabled();
+  await page.locator('.tv-note summary').click(); await page.locator('#tv-note-text').fill('Keep this draft');
+  await page.getByRole('button', { name: 'Next watchlist ticker' }).click();
+  await expect(page.locator('.tv-note-prompt')).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.locator('#tv-note-text')).toHaveValue('Keep this draft');
+  await page.getByRole('button', { name: 'Next watchlist ticker' }).click();
+  await page.getByRole('button', { name: 'Save and continue' }).click();
+  await expect(page.locator('.tv-symbol')).toHaveText('$META');
+  await page.getByRole('button', { name: 'Next watchlist ticker' }).focus(); await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.tv-symbol')).toHaveText('$MSFT');
+  await page.screenshot({ path: 'test-results/research-wide.png' });
+  await page.setViewportSize({ width: 420, height: 900 });
+  await expect(page.locator('.watch-section')).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/research-narrow.png' });
+  await page.getByRole('button', { name: 'Back to watchlist' }).click();
+  await expect(page.locator('#research-panel')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open MSFT stock card' })).toBeFocused();
+});
+
+test('sparklines share a bounded chart queue, retain range changes and label failures and stale data', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'MSFT', 'META', 'SPY', 'QQQ'], testChartDelay: 200,
+    testCharts: { MSFT: { error: 'Chart unavailable' }, META: { status: { stale: true } } }
+  } });
+  await expect(page.locator('.watch-trend svg')).toHaveCount(4);
+  await expect(page.locator('.watch-row[data-symbol="MSFT"] .watch-trend')).toContainText('Unavailable');
+  await expect(page.locator('.watch-row[data-symbol="META"] .watch-trend')).toContainText('STALE');
+  expect(await page.evaluate(() => window.maxTestCharts)).toBeLessThanOrEqual(3);
+  await page.getByRole('combobox', { name: 'Watchlist trend timeframe' }).selectOption('5D');
+  await page.getByRole('combobox', { name: 'Watchlist trend timeframe' }).selectOption('1Y');
+  await expect(page.locator('.trend-heading')).toHaveText('Trend · 1Y');
+  await expect(page.locator('.watch-trend svg')).toHaveCount(4);
+  await expect(page.locator('.watch-row[data-symbol="AAPL"] .watch-trend button')).toHaveAttribute('aria-label', /AAPL 1Y price return/);
+  await page.locator('.watch-row[data-symbol="AAPL"] .watch-trend button').click();
+  await expect(page.locator('.tv-symbol')).toHaveText('$AAPL');
+});
+
+test('comparison supports four selections, shared charts, stats, keyboard inspection and narrow navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'MSFT', 'META', 'SPY', 'QQQ'],
+    quoteSnapshots: { AAPL: { name: 'Apple', price: 100, currency: 'USD', changePercent: 0 }, MSFT: { price: 200, currency: 'EUR', changePercent: 1 } }
+  } });
+  await expect(page.locator('.watch-trend svg')).toHaveCount(5);
+  const initialCharts = await page.evaluate(() => window.testCalls.filter(call => call.action === 'chart').length);
+  await page.getByRole('button', { name: 'Select tickers to compare' }).click();
+  const launch = page.getByRole('button', { name: 'Compare selected tickers' });
+  await expect(launch).toBeDisabled();
+  for (const ticker of ['AAPL', 'MSFT', 'META', 'SPY']) await page.getByRole('checkbox', { name: `Compare ${ticker}`, exact: true }).check();
+  await expect(page.getByRole('checkbox', { name: 'Compare QQQ', exact: true })).toBeDisabled();
+  await page.locator('#watch-filter').fill('Apple');
+  await expect(page.locator('.comparison-selection button')).toHaveCount(4);
+  await page.locator('#watch-filter').fill('');
+  await launch.click();
+  await expect(page.locator('.comparison-chart')).toBeVisible();
+  expect(await page.evaluate(() => window.testCalls.filter(call => call.action === 'chart').length)).toBe(initialCharts);
+  await expect(page.getByRole('table', { name: 'Ticker comparison statistics' })).toContainText('EUR 200');
+  await expect(page.getByRole('table', { name: 'Ticker comparison statistics' })).toContainText('0.00%');
+  const before = await page.locator('#comparison-readout').textContent();
+  await page.locator('.comparison-chart').focus(); await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#comparison-readout')).not.toHaveText(before);
+  await page.getByRole('combobox', { name: 'Comparison timeframe' }).selectOption('6M');
+  await expect(page.locator('.comparison-chart')).toBeVisible();
+  await page.screenshot({ path: 'test-results/comparison-wide.png' });
+  await page.setViewportSize({ width: 420, height: 900 });
+  await expect(page.locator('.watch-section')).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/comparison-narrow.png' });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#research-panel')).toBeHidden(); await expect(launch).toBeFocused();
+  await page.getByRole('button', { name: 'Remove META from comparison' }).click();
+  await expect(page.getByRole('checkbox', { name: 'Compare QQQ', exact: true })).toBeEnabled();
+});
+
+test('comparison excludes failed charts and explains disjoint sessions without inventing returns', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const chart = offset => ({ interval: '5m', timezone: 'UTC', points: [{ time: 100 + offset, close: 100 }, { time: 200 + offset, close: 110 }] });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'MSFT', 'META'],
+    testCharts: { AAPL: { chart: chart(0), status: { stale: true } }, MSFT: { chart: chart(1000) }, META: { error: 'Provider offline' } }
+  } });
+  await page.getByRole('button', { name: 'Select tickers to compare' }).click();
+  for (const ticker of ['AAPL', 'MSFT', 'META']) await page.getByRole('checkbox', { name: `Compare ${ticker}`, exact: true }).check();
+  await page.getByRole('button', { name: 'Compare selected tickers' }).click();
+  await expect(page.locator('#ticker-comparison')).toContainText('META: Provider offline · excluded.');
+  await expect(page.locator('#ticker-comparison')).toContainText('AAPL: STALE cached chart.');
+  await expect(page.locator('#comparison-readout')).toContainText('Insufficient overlapping');
+  await expect(page.locator('.comparison-chart')).toHaveCount(0);
+});
+
+test('hidden research windows pause queued chart loads and resume the latest range', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'MSFT', 'META', 'SPY', 'QQQ', 'NVDA'], testChartDelay: 400
+  } });
+  await expect.poll(() => page.evaluate(() => window.activeTestCharts)).toBe(3);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect.poll(() => page.evaluate(() => window.activeTestCharts)).toBe(0);
+  const paused = await page.evaluate(() => window.testCalls.filter(call => call.action === 'chart').length);
+  expect(paused).toBe(3);
+  await page.getByRole('combobox', { name: 'Watchlist trend timeframe' }).selectOption('1Y');
+  expect(await page.evaluate(() => window.testCalls.filter(call => call.action === 'chart').length)).toBe(paused);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(page.locator('.watch-trend svg')).toHaveCount(6);
+  await expect(page.locator('.watch-row[data-symbol="AAPL"] .watch-trend button')).toHaveAttribute('aria-label', /AAPL 1Y price return/);
+  expect(await page.evaluate(() => window.maxTestCharts)).toBe(3);
+});
+
+test('comparison transition honors unsaved notes and keeps successful charts after a provider failure', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'MSFT', 'META'], testCharts: { META: { error: 'Provider offline' } }
+  } });
+  await page.getByRole('button', { name: 'Select tickers to compare' }).click();
+  for (const ticker of ['AAPL', 'MSFT', 'META']) await page.getByRole('checkbox', { name: `Compare ${ticker}`, exact: true }).check();
+  await page.getByRole('button', { name: 'Open AAPL stock card' }).click();
+  await page.locator('.tv-note summary').click(); await page.locator('#tv-note-text').fill('Do not lose this');
+  await page.getByRole('button', { name: 'Compare selected tickers' }).click();
+  await expect(page.locator('.tv-note-prompt')).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.locator('#tv-note-text')).toHaveValue('Do not lose this');
+  await page.getByRole('button', { name: 'Compare selected tickers' }).click();
+  await page.getByRole('button', { name: 'Save and continue' }).click();
+  await expect(page.locator('.comparison-chart')).toBeVisible();
+  await expect(page.locator('#ticker-comparison')).toContainText('META: Provider offline · excluded.');
+  await expect(page.locator('.comparison-legend span')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Remove AAPL from comparison' }).click();
+  await expect(page.locator('#comparison-readout')).toContainText('Insufficient overlapping');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Open AAPL stock card' }).click();
+  await expect(page.locator('#tv-note-text')).toHaveValue('Do not lose this');
+});
+
+test('research chart reuse respects worker retrieval age and retries stale fallbacks after cooldown', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await mockChrome(page, { popup: true, url: 'https://x.com/popup.html?expanded=1', initial: {
+    watchlist: ['AAPL', 'MSFT'], testCharts: {
+      AAPL: { status: { fetchedAt: Date.now() - 6 * 3600000 + 5000 } },
+      MSFT: { status: { stale: true, fetchedAt: Date.now() - 7 * 3600000 } }
+    }
+  } });
+  await expect(page.locator('.watch-trend svg')).toHaveCount(2);
+  await page.evaluate(() => { const now = Date.now; Date.now = () => now() + 6000; document.dispatchEvent(new CustomEvent('tickerview:dashboard-refreshed')); });
+  await expect.poll(() => page.evaluate(() => window.testCalls.filter(call => call.action === 'chart' && call.ticker === 'AAPL').length)).toBe(2);
+  expect(await page.evaluate(() => window.testCalls.filter(call => call.action === 'chart' && call.ticker === 'MSFT').length)).toBe(1);
+  await page.evaluate(() => { const now = Date.now; Date.now = () => now() + 21000; document.dispatchEvent(new CustomEvent('tickerview:dashboard-refreshed')); });
+  await expect.poll(() => page.evaluate(() => window.testCalls.filter(call => call.action === 'chart' && call.ticker === 'MSFT').length)).toBe(2);
 });

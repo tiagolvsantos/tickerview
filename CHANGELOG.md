@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Docked ticker research in wide market windows and a full-width research view with Back in smaller windows, reusing existing charts, research sections and note safeguards.
+- Watchlist price sparklines with shared timeframe controls, lazy loading, stale/error labels and a three-request chart queue.
+- Comparison of 2–4 saved tickers with aligned percentage-performance charts, keyboard inspection and quote/RSI statistics. Research and comparison choices remain session-only.
+
 ## [2.2.0] - 2026-10-26
 
 Minor release adding watchlist indicators, manual ordering, faster controls, and clearer market-window layouts.

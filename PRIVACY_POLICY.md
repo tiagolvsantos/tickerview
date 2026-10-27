@@ -12,13 +12,15 @@ Search and cashtags resolve aliases locally. Opening a ticker card sends the res
 
 As with any direct internet request, the provider can receive connection information such as your IP address and user agent. Yahoo Finance handles requests under its own privacy practices. The extension does not send your watchlist or recent-symbol list as a batch. Opening a visible extension window requests SPY, QQQ, ^VIX, and BTC-USD for the market overview, reusing the quote cache. Refresh requests the overview and saved symbols separately through a three-request queue. Retry quotes requests only unavailable, stale, or failed symbols from that overview and watchlist, using the same queue and cooldowns. Saved-symbol refreshes also retrieve daily history for RSI (14) and estimated year-to-date anchored VWAP, reusing the six-hour history cache. Calculations run locally and failures leave successful quotes available. Auto-refresh is enabled by default every 15 seconds while the window is visible and pauses while hidden. The interval can be changed to 15/30 seconds or 1/2/5 minutes, or disabled, under Settings → Market. Automatic quote-cache freshness follows this interval; manual refresh bypasses fresh cache entries while preserving shared requests and failure cooldowns. If an overview symbol is also saved, its watchlist snapshot is updated too; other watchlist symbols remain cached until refreshed.
 
+Watchlist trend sparklines and ticker comparison request each displayed symbol and selected chart range separately from Yahoo Finance. Chart requests share a queue limited to three concurrent requests per window, reuse the bounded worker cache and failure cooldowns, and pause queued loading while the window is hidden. Trend series load as their cells approach the visible area. Comparison calculations run locally; selected ticker groups are never sent as a batch. The research panel reuses existing per-symbol card requests and local note storage.
+
 ## Local storage
 
 TickerView stores the following in Chrome's local extension storage on this browser:
 
 - Up to 100 personal notes (4,000 characters each), stored by canonical symbol independently of watchlist membership. Notes are never sent to Yahoo or the developer. Saving an empty note deletes it.
 - Up to 100 custom ticker aliases and your watchlist sort preference. Alias keys and mappings remain local; saving a mapping sends its target symbol to Yahoo for verification.
-- Expanded/collapsed card-section preferences, shared across tickers and stored only on this browser. These preferences are excluded from backups. Watchlist filtering and Undo state last only for the current window session.
+- Expanded/collapsed card-section preferences, shared across tickers and stored only on this browser. These preferences are excluded from backups. Watchlist filtering, Undo state, research navigation, trend/comparison timeframe choices and comparison selections last only for the current window session.
 - Settings, including the hostnames of sites where you disabled the extension.
 - P/E valuation assumptions for up to 100 stock symbols. Calculations run locally; assumptions are not sent to a provider.
 - Up to 100 watchlist symbols and the 12 most recently opened symbols.
